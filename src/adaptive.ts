@@ -14,6 +14,17 @@ export async function runAdaptive(runtime: Runtime, receivableId?: string, depth
   const runId = await engine.plan();
   const run = store.read().runs.find(item => item.id === runId);
   if (!run || run.status !== 'DONE') return { runId };
+  // Tool calls and review can outlive the 30-second observation window.
+  // Refresh actual cash before deriving a bridge gap; changed facts require a new LLM plan.
+  await refreshCrosschainBalances(store, sources, true);
+  const snapshot = await engine.gateway.snapshot();
+  store.change(state => { state.snapshot = snapshot; });
+  const observed = store.read();
+  if (run.financialVersion !== observed.financialVersion || run.policyVersion !== observed.policy.version) {
+    store.change(state => { state.runs.find(item => item.id === runId)!.executionStatus = 'INVALIDATED'; });
+    if (depth >= 8) throw new Error('FUNDING_PLAN_STALE');
+    return runAdaptive(runtime, undefined, depth + 1, false);
+  }
   const bridgeId = receivableId ? await bridge.fund(receivableId, runId) : await bridge.fundFromInventory(runId);
   if (!bridgeId) {
     const current = store.read();

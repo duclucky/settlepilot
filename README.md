@@ -368,7 +368,7 @@ Live model evaluation checks expectations and reports any unmet result, includin
 
 ## Status and supporting documentation
 
-The public [SettlePilot showcase](https://settlepilot-mu.vercel.app) has a separate Vercel frontend and continuous VPS backend. This source increment is verified locally; new code is not automatically deployed by a local build. See [implementation status](docs/03-implementation-status.md) for dated onchain/provider evidence and outstanding activation/publication requirements.
+The public [SettlePilot showcase](https://settlepilot-mu.vercel.app) has a separate Vercel frontend and continuous VPS backend. The current product update is deployed; a local build does not automatically deploy later changes. See [implementation status](docs/03-implementation-status.md) for verification and outstanding financial activation requirements.
 
 - [Installation reference](docs/INSTALLATION.md)
 - [Product scope](docs/01-product-scope.md)

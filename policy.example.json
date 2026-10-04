@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "chainId": 5042002,
+  "sender": "REPLACE_WITH_REGISTERED_TESTNET_EOA_ADDRESS",
+  "allowlist": ["REPLACE_WITH_AUTHORIZED_CONTRACTOR_ADDRESS"],
+  "reserve": "5000000",
+  "gasLimit": "1000000",
+  "perObligation": "1000000",
+  "totalBudget": "1000000",
+  "authorityExpiresAt": "1970-01-01T00:00:00.000Z",
+  "enabled": false
+}

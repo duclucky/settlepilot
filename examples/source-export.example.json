@@ -1,0 +1,20 @@
+{
+  "sourceId": "fixture",
+  "parties": [
+    {"id":"fixture-contractor","name":"Fixture contractor — replace in upstream integration","address":"0x1111111111111111111111111111111111111111"}
+  ],
+  "records": [
+    {
+      "externalId":"fixture-payable",
+      "revision":1,
+      "kind":"OBLIGATION",
+      "partyId":"fixture-contractor",
+      "title":"OFFLINE SCHEMA EXAMPLE — not a real payable",
+      "amount":"0.01",
+      "due":"2026-10-04T00:00:00.000Z",
+      "acceptance":"UNKNOWN",
+      "evidence":"Labeled fixture. Replace from an authorized upstream business exporter.",
+      "active":true
+    }
+  ]
+}

@@ -35,10 +35,15 @@ Run:
 ```powershell
 npm ci
 npm run build
-powershell -File .\Open-SettlePilot.ps1
 ```
 
-The launcher starts the server in the background and opens **http://127.0.0.1:4317**. It reuses an existing healthy local panel. Leave the server running while the Agent works.
+After this one-time setup, close PowerShell and **double-click `Open-SettlePilot.vbs`**. This is the normal daily launcher: PowerShell and the backend run hidden; only your default browser opens **http://127.0.0.1:4317**. It reuses an existing healthy local panel. Leave the server running while the Agent works. A startup failure shows a dialog instead of a console window. If Windows blocks a downloaded script or Windows Script Host is unavailable, follow your device's script policy or use the manual console option below.
+
+For a different port with the same hidden startup:
+
+```powershell
+wscript.exe .\Open-SettlePilot.vbs 4327
+```
 
 For a visible server console instead:
 

@@ -15,3 +15,13 @@ The hosted Agent remains in simulation with operations paused and financial exec
 The downloadable installer now includes shared primary/reviewer usage budgets, durable SQLite request history and archive, bounded recovery of unchanged evaluations, batched tool prerequisites, incomplete-response rejection and disabled-model financial guards. Fresh model settings default to GPT-5.4 mini; existing settings are retained. See [update scope and verification](34-installer-agent-update.md) and [installation and usage](../README.md).
 
 Both the installer checkout and a fresh credential-free GitHub clone pass 252 offline tests and the TypeScript/Vite build. The Windows launcher files are unchanged and pass static validation; the product was not started on this PC. No live model, Telegram or testnet execution was performed for this release.
+
+## Local workspace and Setup — 2026-10-05
+
+The installer adopts the simplified white/indigo workspace with Overview, Payments, Funds, Agent log, Your decisions and Setup. The overview separates customer receipts, unsettled obligations and matching verified payouts; offchain outcomes remain explicitly labelled. Exact owner Approve/Cancel/Comment controls and decision exports are retained.
+
+Setup contains write-only model endpoint/model/API key fields, optional Jev and Telegram, business-source settings, and a Circle Agent Wallet connection flow. It discovers the pinned CLI, presents current Terms for explicit consent, supports testnet email/OTP authentication, lists eligible Arc wallets and verifies the selected wallet and RPC network. Startup configuration cannot silently switch an existing wallet or grant spending authority. Local stop is session-protected and blocked by active or unresolved operations. Launcher files remain unchanged.
+
+Verification uses offline adapters and an isolated browser fixture with an in-memory database and no Agent workers. No real Circle login, Terms acceptance, provider call, alert or financial transaction was performed. See [scope and verification](35-local-workspace-and-setup.md); actual Circle login remains dependent on the owner's account and OTP.
+
+The local workspace/Setup increment passes 260 offline tests and the production build. Desktop/mobile fixture inspection and the 222-file public-source scan pass. The isolated preview was closed after verification.

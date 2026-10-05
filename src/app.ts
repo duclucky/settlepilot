@@ -18,10 +18,11 @@ import { analyzeLiquidity } from './liquidity-analysis.ts';
 import type { AgentScheduler } from './scheduler.ts';
 import type { TelegramNotificationService } from './telegram-settings.ts';
 import type { LlmSettingsService } from './llm-settings.ts';
+import { assertSetupIdle, type WalletSettingsService } from './wallet-settings.ts';
 
 const ReceiptInput = z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/), source: Address, amount: z.string().transform(money), invoice: z.string().trim().min(1).max(120) }).strict();
 const CrosschainInput = ReceiptInput.extend({ sourceChain: z.enum(SOURCE_CHAIN_NAMES) });
-export function createApp(runtime: Runtime, token = randomBytes(32).toString('hex'), services: { telegram?: TelegramNotificationService; llm?: LlmSettingsService; scheduler?:AgentScheduler } = {}) {
+export function createApp(runtime: Runtime, token = randomBytes(32).toString('hex'), services: { telegram?: TelegramNotificationService; llm?: LlmSettingsService; wallet?:WalletSettingsService; stop?:()=>void; canStop?:()=>boolean; scheduler?:AgentScheduler } = {}) {
   const { store, engine } = runtime;
   const evaluateChanges = async () => services.scheduler ? { jobId:services.scheduler.wake('OWNER_OR_SOURCE_CHANGED') } : runAdaptive(runtime);
   const app = express(); app.disable('x-powered-by');
@@ -81,6 +82,20 @@ export function createApp(runtime: Runtime, token = randomBytes(32).toString('he
     res.json(services.llm.settings());
   });
   app.get('/api/model-usage',(_req,res)=>res.json({limits:modelLimits(),...new ModelRequests(store).snapshot(),costLabel:'Estimated standard text pricing, not provider billing. Unknown outcomes retain reservations; unknown provider prices are not treated as free.'}));
+  app.get('/api/wallet-settings',(_req,res)=>{if(!services.wallet)throw new Error('WALLET_SETTINGS_UNAVAILABLE');res.json(services.wallet.settings());});
+  const walletSetup=()=>{if(!services.wallet)throw new Error('WALLET_SETTINGS_UNAVAILABLE');return services.wallet;};
+  app.post('/api/wallet-settings/inspect',async(_req,res)=>res.json(await walletSetup().inspect()));
+  app.post('/api/wallet-settings/terms',async(req,res)=>res.json(await walletSetup().accept(req.body)));
+  app.post('/api/wallet-settings/login',async(req,res)=>res.json(await walletSetup().login(req.body)));
+  app.post('/api/wallet-settings/otp',async(req,res)=>res.json(await walletSetup().verifyOtp(req.body)));
+  app.post('/api/wallet-settings/create',async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(await walletSetup().create());});
+  app.post('/api/wallet-settings',async(req,res)=>res.json(await walletSetup().configure(req.body)));
+  app.post('/api/local/stop',(req,res)=>{
+    z.object({confirmed:z.literal(true)}).strict().parse(req.body);assertSetupIdle(store);
+    if(!services.stop)throw new Error('LOCAL_STOP_UNAVAILABLE');
+    if(services.canStop?.()===false)throw new Error('LOCAL_WORKER_BUSY');
+    res.json({ok:true});setTimeout(()=>services.stop?.(),250);
+  });
   app.get('/api/model-usage/archive',(req,res)=>{
     const page=z.object({after:z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),limit:z.coerce.number().int().min(1).max(200).default(100)}).strict().parse(req.query);
     res.json(store.modelArchive(page.after,page.limit));

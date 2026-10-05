@@ -17,7 +17,7 @@ Circle CLI yêu cầu Node.js tương thích theo [tài liệu chính thức](ht
 - Đọc `--help` và version thực tế trước khi dùng CLI.
 - Không chấp nhận Terms, login, tạo wallet, nạp tiền hoặc gửi giao dịch chỉ vì đã cài tool.
 - Secret chỉ ở secret manager hoặc file local bị ignore; không đưa vào log hay commit.
-- Cấu hình Telegram tại **Authority & connections → Telegram notifications** trên localhost. Backend lưu ba trường Telegram trong `.env` bị ignore và áp dụng ngay; app không đọc Telegram message hoặc nhận command.
+- Cấu hình model, Circle Agent Wallet và nguồn nghiệp vụ tại **Setup** trên localhost. Telegram ở **Setup → Optional Telegram notifications**. Secret lưu trong `.env` bị ignore; app không đọc Telegram message hoặc nhận command.
 - Cấu hình primary LLM và Jev tại **Authority & connections → LLM connection**. Mỗi provider có endpoint, model và API key write-only; remote endpoint phải dùng HTTPS, HTTP chỉ dùng được trên loopback. Lưu cấu hình không tự gọi provider.
 - Trước adapter mới: đọc docs chính thức, đối chiếu types, viết contract test, rồi mới thử Arc Testnet trong quyền được cấp.
 

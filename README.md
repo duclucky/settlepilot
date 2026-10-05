@@ -65,7 +65,7 @@ Use **http://127.0.0.1:4327**. For foreground startup, set `$env:PORT = '4327'` 
 
 ## 2. Configure the language models
 
-Open **Authority & connections → LLM connection**.
+Open **Setup → LLM connection**.
 
 1. Enable the primary model.
 2. Enter the **endpoint**, **model** and **API key** supplied by your provider. The supported primary API is **OpenAI Responses-compatible**; a Chat Completions-only endpoint is not interchangeable.
@@ -106,60 +106,49 @@ After fixing a blocked provider's credentials or billing, an authenticated `POST
 
 ## 3. Connect your own Circle Agent Wallet
 
-Skip this section to stay in simulation. A real testnet installation needs a separate Circle session, wallet, policy and database.
+Skip this section to stay in simulation. A real testnet installation needs your own Circle session, wallet, private Arc RPC, policy and separate database.
 
-This adapter was verified with **Circle CLI 1.1.4**. Install that version separately from the application's dependencies:
+### Connect from the Setup page
+
+1. Install the supported **Circle CLI 1.1.4** once, using your own Windows account:
+
+   ```powershell
+   npm install -g @circle-fin/cli@1.1.4
+   ```
+
+2. Open **Setup → Your Agent Wallet → Check Circle connection**. The panel discovers the supported global CLI installation; it does not install or update software automatically.
+3. If Terms acceptance is required, read the current links and notice shown by Circle. Check the explicit consent box and choose **Accept Circle Terms** only if you agree. Terms are never accepted automatically.
+4. If you have no valid testnet session, enter your email and choose **Send sign-in code**. Enter the OTP from your email and choose **Verify code**. The OTP is transient and never saved in SettlePilot history, browser storage, logs or `.env`. An existing valid testnet session is reused; it is not silently replaced with another account.
+5. Choose the **Arc Testnet Agent Wallet** from the verified Circle list. If your connected account has no wallet, the panel offers **Create testnet Agent Wallet**.
+6. Enter your **Arc Testnet RPC URL**. Use your unique Canteen RPC for the contest. The panel checks chain ID **5042002**, verifies that the wallet belongs to your Circle testnet session, and saves the connection. The tokenized RPC URL is write-only. A later save can leave it blank to retain the saved value.
+7. Pause operations and allow submitted transactions to reconcile. Choose **Stop panel to apply setup**, then double-click **Open-SettlePilot.vbs**. The browser opens with the saved startup configuration; PowerShell and the backend remain hidden. The stop control refuses active evaluations or unresolved financial operations. Reopening a launcher without stopping a healthy server only reuses it.
+
+A first connection creates a **separate, empty testnet workspace** with an empty recipient allowlist, disabled/expired authority, and `SEND_ENABLED=false` / `BRIDGE_ENABLED=false`. Simulation records, balances and the maintainer's wallets do not carry over. Saving a connection never grants spending authority. For an existing testnet installation, setup preserves its financial history, policy and execution flags and refuses to switch its wallet identity or provider. Configure the authority described below before permitting operations.
+
+Saved model and Telegram keys are retained. The Circle Agent Wallet path does not request a wallet private key or the developer-controlled-wallet entity secret. Circle must run under the same OS account as SettlePilot.
+
+### Alternative terminal connection
+
+If you use a custom npm global directory that the panel cannot discover, complete the CLI session in your own terminal and set the validated CLI entrypoint in your ignored `.env`:
 
 ```powershell
-npm install -g @circle-fin/cli@1.1.4
-circle --version
-circle wallet status
-```
-
-If Circle requires Terms acceptance, inspect the current Terms and Privacy Policy in your own terminal:
-
-```powershell
+circle wallet status --type agent --output json
 circle terms show --init --output json
-```
-
-Only if you agree, accept them yourself using `circle terms accept`. SettlePilot never accepts Terms automatically.
-
-Mainnet and testnet sessions are separate. If a testnet session is missing, start the **testnet** email login:
-
-```powershell
+# Only if you agree to the displayed current Terms:
+circle terms accept --output json
 circle wallet login YOUR_EMAIL --type agent --testnet --init
-```
-
-Replace `REQUEST_ID` and `OTP_FROM_EMAIL` with the values from this login request, and complete it in your own terminal:
-
-```powershell
 circle wallet login --type agent --testnet --request REQUEST_ID --otp OTP_FROM_EMAIL
-```
-
-Request IDs are single-use and expire. If the CLI reports an expired request, start a new login request instead of reusing it. Do not commit or screenshot OTPs or session material. Then verify:
-
-```powershell
-circle wallet status
 circle wallet list --chain ARC-TESTNET --type agent --output json
-```
-
-Use the wallet address returned for **ARC-TESTNET** as the policy sender. Login normally provisions wallets. If no testnet wallet exists, follow the CLI's setup flow; the explicit creation command is `circle wallet create --testnet --output json`.
-
-Find the CLI entrypoint required by the backend:
-
-```powershell
 $circleModuleRoot = (npm root -g).Trim()
 $circleEntry = Join-Path $circleModuleRoot '@circle-fin/cli/dist/index.js'
 Test-Path -LiteralPath $circleEntry
 ```
 
-The result should be `True`. Save that path as `CIRCLE_CLI_ENTRYPOINT` in the local configuration. Use the same operating-system account for Circle login and the SettlePilot process, so it can access that account's session.
+Replace email, request ID and OTP locally; never commit or screenshot session material. Set `CIRCLE_CLI_ENTRYPOINT` to the verified path, reopen the panel, and return to Setup. See [Circle's CLI documentation](https://developers.circle.com/agent-stack/circle-cli) for the provider contract.
 
-The Circle Agent Wallet path does not require importing a private key into the panel or supplying the separate developer-controlled-wallet entity secret fields. See [Circle's CLI documentation](https://developers.circle.com/agent-stack/circle-cli) for provider setup and version changes.
+## 4. Configure testnet authority
 
-## 4. Configure testnet startup and authority
-
-Model, Telegram and business-source connections are edited in the panel. Wallet mode, CLI path, RPCs and the initial financial policy are startup configuration in this release.
+Wallet connection setup and payment authority are separate. **Setup** can save the connection; this release does not provide a general financial-policy editor or migrate an existing authority automatically.
 
 ### Create local configuration without overwriting existing settings
 
@@ -212,7 +201,7 @@ Replace the sender and allowlist placeholders in `data/policy.json`. Set:
 
 Policy amounts are **integer micro-USDC strings**: `"1000000"` means 1 USDC; `"100000"` means 0.10 USDC. Business export amounts, by contrast, use decimal strings such as `"0.10"`.
 
-The example policy is disabled, expired and contains placeholders. Complete it before the first testnet startup. For an authority you have explicitly chosen to grant, initialize `enabled: true` and a future expiry while keeping `SEND_ENABLED=false`. If you intend to use CCTP, initialize the authorized bridge policy with `bridge.enabled: true` while keeping `BRIDGE_ENABLED=false`. This establishes the saved scope without enabling transfers. Generate an expiry you intend to authorize; for example, this prints a timestamp seven days ahead:
+The example policy is disabled, expired and contains placeholders. A policy created by Setup is also disabled and expired, with your verified wallet instead of a placeholder. Complete it before initializing a new authorized testnet database. If Setup already initialized a disabled testnet database, changing this seed file does not activate it; use a reviewed policy migration preserving history. For an authority you have explicitly chosen to grant, initialize `enabled: true` and a future expiry while keeping `SEND_ENABLED=false`. If you intend to use CCTP, initialize the authorized bridge policy with `bridge.enabled: true` while keeping `BRIDGE_ENABLED=false`. This establishes the saved scope without enabling transfers. Generate an expiry you intend to authorize; for example, this prints a timestamp seven days ahead:
 
 ```powershell
 [DateTime]::UtcNow.AddDays(7).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
@@ -248,7 +237,7 @@ Supported source testnets and optional RPC overrides:
 
 Stop the existing server process and restart it from the project folder. With foreground startup, use Ctrl+C, then `npm start`. Rebuilding alone does not replace a running backend. The local installer's launcher reuses a healthy server and is not a restart command.
 
-In **Authority & connections**, check the wallet connection, Arc Testnet identity, balances, recipients, limits and expiry. Fund your own testnet wallet with canonical testnet USDC using a supported faucet; simulation sample balances do not carry across.
+In **Funds** and **Setup**, check the wallet connection, Arc Testnet identity, balances, recipients, limits and expiry. Fund your own testnet wallet with canonical testnet USDC using a supported faucet; simulation sample balances do not carry across.
 
 After verifying a database initialized with the intended enabled policy, set `SEND_ENABLED=true` and restart to activate payouts within that saved scope. CCTP additionally requires an enabled saved bridge policy and `BRIDGE_ENABLED=true`. Sending and bridging are separate gates. Enabling source monitoring or the LLM alone does not turn them on. If you initialized the database with a disabled policy, editing the seed file is not an activation method.
 
@@ -258,7 +247,7 @@ The seed policy initializes a **new** database. Editing its principal budget or 
 
 ## 5. Connect business records
 
-Open **Authority & connections → Automatic operations**.
+Open **Setup → Automatic operations**.
 
 1. Create or select an existing local folder that your business system exports to.
 2. Enter its absolute path in **Business export folder**.
@@ -269,7 +258,7 @@ Your upstream system supplies obligations, expected receivables, parties, deadli
 
 A record uses a stable `externalId` and an increasing `revision` when facts change. Reusing a revision with different content is quarantined. Payees must be registered and allowlisted. Free-text evidence cannot grant acceptance or payment authority. CSV supplies records; party mappings must already exist. The connector scans only the configured folder, not its subfolders.
 
-After saving, **Overview** shows the worker and evaluation status. **Payments** shows imported obligations and incoming transfers. A clean testnet database has no business obligations until a source supplies them.
+After saving, **Overview** shows the Agent status and unpaid queue. **Agent log → Agent plans & connection health** shows workers and evaluations. **Payments** shows imported obligations and incoming transfers. A clean testnet database has no business obligations until a source supplies them.
 
 Daily users do not enter transaction hashes, CCTP routes or transfer amounts into forms. The Agent obtains technical facts from the connected sources and providers.
 
@@ -277,10 +266,12 @@ Daily users do not enter transaction hashes, CCTP routes or transfer amounts int
 
 | Page | What to do |
 | --- | --- |
-| **Overview** | Observe connection health, mission status, balances and upcoming obligations |
-| **Agent actions** | Resolve bounded requests through **Approve**, **Cancel** or **Comment**; export saved decision records |
+| **Overview** | See customer receipts, remaining obligations and who needs payment first |
+| **Your decisions** | Resolve exact requests through **Approve**, **Cancel** or **Comment** |
+| **Agent log** | Read saved decisions, export a decision record, inspect plans and worker health |
+| **Funds** | Read the Arc balance, liquidity forecast and current spending authority |
 | **Payments** | Follow imported obligations, incoming USDC, payout/bridge status and receipt links |
-| **Authority & connections** | Configure models, source monitoring, Telegram and wallet checks |
+| **Setup** | Configure the model, Circle Agent Wallet, business source and optional Telegram |
 
 ### Understand payment readiness
 
@@ -294,7 +285,7 @@ The LLM selects priorities and funding routes. If it proposes several individual
 
 ### Respond to an exception
 
-Open the request in **Agent actions** and inspect its exact scope.
+Open the request in **Your decisions** and inspect its exact scope.
 
 - **Approve** grants the specific authority offered by that request, bound to the obligation, policy, financial state and expiry. It cannot manufacture funds or bypass recipient, network, idempotency or receipt checks.
 - **Cancel** rejects that proposal. It does not invent a dispute.
@@ -308,7 +299,7 @@ Operational uncertainty may offer instructions instead of payment approval. Chan
 
 A plan, provider acceptance, transaction hash and verified settlement are different stages. Only a verified successful receipt for the expected chain, sender, recipient and amount marks a testnet payment settled. Simulation never produces a real hash.
 
-In **Agent actions → Decision history**, select **Export decision**. It captures financial facts, document digests and final reviewed choices saved before execution, with execution outcomes labelled separately. New records survive restart; older runs have no reconstructed history.
+In **Agent log → Decision history**, select **Export decision**. It captures financial facts, document digests and final reviewed choices saved before execution, with execution outcomes labelled separately. New records survive restart; older runs have no reconstructed history.
 
 To check an exported file's integrity locally:
 
@@ -320,7 +311,7 @@ The digest detects edits to the captured payload. It is not a signature or indep
 
 ## 7. Enable optional Telegram alerts
 
-Open **Authority & connections → Telegram notifications**.
+Open **Setup → Optional Telegram notifications**.
 
 1. Enter your bot token and chat ID.
 2. Enable notifications and save.
@@ -401,6 +392,7 @@ Live model evaluation checks expectations and reports any unmet result, includin
 The public [SettlePilot showcase](https://settlepilot-mu.vercel.app) has a separate Vercel frontend and continuous VPS backend. The current product update is deployed; a local build does not automatically deploy later changes. See [implementation status](docs/03-implementation-status.md) for verification and outstanding financial activation requirements.
 
 - [Installation reference](docs/INSTALLATION.md)
+- [Local workspace and Setup](docs/35-local-workspace-and-setup.md)
 - [Product scope](docs/01-product-scope.md)
 - [Adaptive Agent loop](docs/06-adaptive-agent-loop.md)
 - [Runtime instructions and memory](docs/12-hermes-inspired-agent-runtime.md)

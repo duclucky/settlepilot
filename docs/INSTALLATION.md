@@ -1,6 +1,6 @@
-# Install Tameion locally
+# Install SettlePilot locally
 
-Tameion runs on your own computer. The public website is a read-only daily demonstration using the maintainer's separate wallet; installing this source never imports that wallet, API keys, balances or transaction history.
+SettlePilot runs on your own computer. The public website is a read-only daily demonstration using the maintainer's separate wallet; installing this source never imports that wallet, API keys, balances or transaction history. The detailed current installation and usage guide is in [README](../README.md).
 
 ## First startup
 
@@ -9,20 +9,21 @@ Install Node.js 24.11+ and Git. Download/extract the installer repository ZIP or
 ```powershell
 npm ci
 npm run build
-powershell -File .\Open-Tameion.ps1
 ```
+
+Close PowerShell after this one-time setup and double-click **Open-SettlePilot.vbs**. PowerShell and the backend run hidden; only the browser opens.
 
 The panel opens at `http://127.0.0.1:4317`. You can also run `npm start` and open the URL yourself. No `.env` is needed for the first simulation startup. Keep the server running while the Agent works. This is a localhost panel, not an internet-facing administration service.
 
 ## Models and notifications
 
-Open **Authority & connections → LLM connection**. Enter the primary model, Responses-compatible endpoint and API key; the demonstrated model is `gpt-5.4`. Configure Jev separately with its endpoint, model and API key. Saving applies the connection locally; keys remain write-only in the ignored `.env`. Do not put keys in issues, screenshots, Git commits or the public website.
+Open **Setup → LLM connection**. Enter the primary model, Responses-compatible endpoint and API key; the default model is `gpt-5.4-mini`. Configure Jev under **Optional Jev review**. Saving applies the connection locally; keys remain write-only in the ignored `.env`. Do not put keys in issues, screenshots, Git commits or the public website.
 
-Telegram is optional. In **Telegram notifications**, configure the bot token and chat ID. Alerts are generic and graded by urgency. Telegram cannot issue commands or approvals; respond on the local panel.
+Telegram is optional. In **Setup → Optional Telegram notifications**, configure the bot token and chat ID. Alerts are generic and graded by urgency. Telegram cannot issue commands or approvals; respond on the local panel.
 
 ## Agent Wallet and financial authority
 
-Set up your own Circle Agent Wallet following [Circle Agent Stack](https://developers.circle.com/agent-stack). Use a dedicated testnet wallet and an authenticated local Circle CLI session. This release's operating wallet integration uses `WALLET_PROVIDER=agent`, the local `CIRCLE_CLI_ENTRYPOINT`, and Arc Testnet (`5042002`). It does not import a private key from the public demo.
+Install Circle CLI 1.1.4 once, then open **Setup → Your Agent Wallet**. Check the connection, review Circle's current Terms if needed, and authenticate through email/OTP. Select your Arc Testnet wallet and supply your private Arc RPC. Saving verifies the wallet and network and keeps transfers disabled for a new workspace. Pause operations, stop the idle panel using its Setup control, then reopen **Open-SettlePilot.vbs**. Pending operations must reconcile first. See [README](../README.md) for the complete flow and alternative terminal setup.
 
 For the one-time testnet startup configuration:
 
@@ -31,11 +32,11 @@ For the one-time testnet startup configuration:
 3. Set `TAMEION_MODE=testnet`, `WALLET_PROVIDER=agent`, `CIRCLE_CLI_ENTRYPOINT`, `POLICY_FILE` and a separate `DATABASE_PATH=data/testnet.db`. Configure Arc RPC and permitted CCTP source-chain RPCs. Keep tokenized RPC URLs private.
 4. Restart the server and verify the wallet address, chain, observed balances and active limits on the panel. A cumulative budget does not reset daily. Enable sending/bridging only for the scope you authorize.
 
-Wallet mode, CLI path and financial policy are startup configuration in this release; the settings panel edits model, Telegram and source connections, not arbitrary wallet authority. A database is bound to its wallet/mode; do not reuse the simulation database for a real testnet wallet.
+Setup saves the wallet connection and creates a disabled initial policy when none exists. It does not edit arbitrary financial authority. The seed policy initializes a new database only; changing it does not replace the policy in an existing database. A wallet or authority change for an existing database requires a reviewed migration preserving its history. Do not reuse simulation history for a real testnet wallet.
 
 ## Business records
 
-Open **Automatic operations** under Authority & connections. Select the folder where your business exporter writes versioned records, then enable evaluations. Grant structured acceptance authority only to a source you trust. The schema is in [source-export.example.json](../examples/source-export.example.json); it is an integration reference, not a daily transaction form. Payees still require the policy allowlist.
+Open **Setup → Automatic operations**. Select the folder where your business exporter writes versioned records, then enable evaluations. Grant structured acceptance authority only to a source you trust. The schema is in [source-export.example.json](../examples/source-export.example.json); it is an integration reference, not a daily transaction form. Payees still require the policy allowlist.
 
 The Agent observes balances and records, checks evidence, selects payment/funding/hold, and reconciles operations. Only verified Arc funds are spendable. Burned or pending crosschain money is not an Arc balance. Daily interaction is limited to scoped Approve, Cancel or Comment requests when the Agent cannot resolve a case in its current authority.
 

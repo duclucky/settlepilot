@@ -13,6 +13,7 @@ import { PlanInput } from '../goal-plans.ts';
 import { sameFinancialProposal, reviewCaseBinding } from '../review-binding.ts';
 import type { ReviewFeedback, ReviewObservation } from '../planning-types.ts';
 import { analyzeLiquidity } from '../liquidity-analysis.ts';
+import { fundingPortfolio } from '../funding-portfolio.ts';
 import {ModelRequestError} from '../model-requests.ts';
 
 const ToolCall = z.object({ type: z.literal('function_call'), name: z.string(), call_id: z.string(), arguments: z.string() });
@@ -280,8 +281,7 @@ export class ModelPlanner implements Planner {
         } else if (call.name === 'finish') {
           const parsed = z.object({ decisions: ProposedDecision.array().max(200) }).strict().parse(args);
           const decisions = parsed.decisions.map(decision => {
-            const obligation = state.obligations.find(item => item.id === decision.obligationId);
-            const funding = obligation && decision.action === 'FUND_ARC' && planningEligibility(state, obligation, planningAt) === 'FUNDING_REQUIRED';
+            const funding = decision.action === 'FUND_ARC';
             return { ...decision, ...(funding && selectedFundingSource ? { fundingSourceChain: selectedFundingSource } : {}) };
           });
           for (const decision of decisions) if (!['PAY_NOW', 'FUND_ARC'].includes(decision.action)) policyRejections.delete(decision.obligationId);
@@ -296,14 +296,14 @@ export class ModelPlanner implements Planner {
             if (['PAY_NOW', 'FUND_ARC'].includes(decision.action) && !loadedSkills.has('settle-obligations')) throw new Error('SETTLEMENT_SKILL_NOT_LOADED');
             if (['PAY_NOW', 'FUND_ARC'].includes(decision.action) && !policyChecked.has(decision.obligationId)) throw new Error('POLICY_NOT_INSPECTED');
             const obligation = state.obligations.find(item => item.id === decision.obligationId);
-            if (decision.action==='FUND_ARC' && obligation && planningEligibility(state, obligation, planningAt) === 'FUNDING_REQUIRED' && (!treasuryInspected || !loadedSkills.has('fund-arc-with-cctp') || !selectedFundingSource)) throw new Error('FUNDING_SOURCE_NOT_SELECTED');
+            if (decision.action==='FUND_ARC' && obligation && (!treasuryInspected || !loadedSkills.has('fund-arc-with-cctp') || !selectedFundingSource)) throw new Error('FUNDING_SOURCE_NOT_SELECTED');
           }
           const validated = validateDecisions(decisions, state);
           for (const decision of validated) {
             if (!['PAY_NOW', 'FUND_ARC'].includes(decision.action)) continue;
             const obligation = state.obligations.find(item => item.id === decision.obligationId)!;
             const eligibility = planningEligibility(state, obligation, planningAt);
-            const allowed = decision.action === 'FUND_ARC' ? eligibility === 'FUNDING_REQUIRED' : ['ALLOW', 'STALE_BALANCE'].includes(eligibility);
+            const allowed = decision.action === 'FUND_ARC' ? ['ALLOW','FUNDING_REQUIRED'].includes(eligibility) : ['ALLOW', 'STALE_BALANCE'].includes(eligibility);
             if (!allowed) {
               policyRejections.set(decision.obligationId, eligibility);
               throw new Error(`${decision.action}_REJECTED_${eligibility}`);
@@ -324,12 +324,19 @@ export class ModelPlanner implements Planner {
             this.workspace.recordTool(runId,call.name,'ERROR','PAYMENT_PORTFOLIO_INFEASIBLE');
             input.push({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)});progressCheck('ERROR',call.name,beforeProgress);continue;
           }
+          const portfolio=fundingPortfolio(state,financial.map(d=>d.obligationId),planningAt);
+          if(validated.some(d=>d.action==='FUND_ARC')){
+            if(portfolio.conflicts.length)throw new Error(`FUND_ARC_REJECTED_${portfolio.conflicts[0].result}`);
+            if(portfolio.gapUnits==='0')throw new Error('FUNDING_NOT_NEEDED');
+          }
           if(payouts.length>1){
             const preview=previewPlan(state,{steps:payouts.map(d=>({obligationId:d.obligationId,action:d.action,sourceChain:null}))},planningAt);
             const conflicts=preview.steps.filter(step=>!['PAYMENT_FEASIBLE','STALE_BALANCE'].includes(step.result));
             if(conflicts.length){
+              const sources=analyzeLiquidity(state,planningAt).sources.filter(s=>s.fundingEnabled&&BigInt(s.observedUnits)>0n);
               result={error:'PAYMENT_PORTFOLIO_INFEASIBLE',executionAuthorized:false,conflicts,
-                instruction:'Revise the ordered decisions using shared balance, gas, reserve and budget. Choose which obligations to HOLD; the backend will not choose for you.'};
+                ...(portfolio.gapUnits&&BigInt(portfolio.gapUnits)>0n&&sources.length?{fundingAlternative:{...portfolio,sources}}:{}),
+                instruction:'Revise the selected portfolio and order. Consider explicitly choosing FUND_ARC targets and a verified source for a positive shared deficit, or HOLD a smaller authorized subset. Funding is conditional until verified mint; PAY_NOW still requires existing Arc cash. The backend will not choose for you.'};
               this.workspace.recordTool(runId,call.name,'ERROR','PAYMENT_PORTFOLIO_INFEASIBLE');
               input.push({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)});
               progressCheck('ERROR',call.name,beforeProgress);

@@ -39,3 +39,9 @@ The [LLM loop repair](38-llm-loop-control.md) suppresses unchanged rechecks, can
 The request meter now recognizes exact provider-emitted reasoning/tool history using durable hashes and confirmed usage. New or changed opaque data still uses byte reservation; budgets, output allowance and anti-loop guards are unchanged. The actual planner completes context/source-selection/finish offline within three requests and USD 0.10. See [scope, failure reproduction and verification](39-model-replay-reservation.md). This increment makes no live settlement claim.
 
 Verification: 286 offline tests and production build; matching hosted code passes 337 tests and both builds. No live provider or testnet action was performed for this optimization.
+
+## Portfolio funding repair — 2026-10-05
+
+Explicit LLM-selected FUND_ARC targets now share one validated deficit calculation across planner, preview and CCTP, including individually ALLOW targets that collectively lack cash. Zero-gap and invalid portfolios cannot authorize funding. Infeasible payout feedback exposes a conditional funding alternative; PAY_NOW still requires existing Arc cash. Funding targets persist as goals through mint without an extra model tool call. Deadline facts and settlement instructions make overdue/earliest-due priority explicit; trusted business reasons can justify a different order.
+
+Verification: 296 offline installer tests and build; hosted counterpart 347 tests and both builds. See [scope and verification](40-portfolio-funding.md). No live provider or financial operation was run for this repair; real model priority choices remain unverified.

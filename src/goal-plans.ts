@@ -29,7 +29,16 @@ export function recordGoalPlan(s:State,raw:unknown,now=Date.now()) {
 export function recordPlanDecisions(s:State,decisions:Decision[],runId:string,now=Date.now()) {
   for(const d of decisions){
     const o=s.obligations.find(o=>o.id===d.obligationId);
-    const plan=s.autonomy?.plans?.find(p=>p.obligationId===o?.id&&p.obligationVersion===o.version&&p.policyVersion===s.policy.version&&p.bridgePolicyVersion===s.bridgePolicy.version&&p.status!=='SUPERSEDED');
+    let plan=s.autonomy?.plans?.find(p=>p.obligationId===o?.id&&p.obligationVersion===o.version&&p.policyVersion===s.policy.version&&p.bridgePolicyVersion===s.bridgePolicy.version&&p.status!=='SUPERSEDED');
+    // Retain the model's selected funding target even when it did not call record_plan.
+    // These steps record intent only; refreshGoalPlans derives proof independently.
+    if(!plan&&o&&s.autonomy&&d.action==='FUND_ARC'&&d.fundingSourceChain){
+      const saved=recordGoalPlan(s,{obligationId:o.id,objective:'Settle the selected obligation after verified CCTP mint.',steps:[
+        {action:'FUND_ARC',reason:d.reason.slice(0,300),sourceChain:d.fundingSourceChain},
+        {action:'PAY_NOW',reason:'Reassess current evidence, authority and Arc cash after verified mint.',sourceChain:null},
+      ]},now);
+      plan=s.autonomy.plans!.find(p=>p.id===saved.planId);
+    }
     if(!plan)continue;
     const item={runId,action:d.action,reason:d.reason,sourceChain:d.fundingSourceChain,review:d.review,at:now};
     const previous=plan.history.findIndex(h=>h.runId===runId);if(previous<0)plan.history.push(item);else plan.history[previous]=item;

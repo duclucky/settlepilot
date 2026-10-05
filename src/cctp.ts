@@ -5,7 +5,7 @@ import { Store, event } from './store.ts';
 import { ArcReader } from './adapters/arc.ts';
 import { EvmSourceReader } from './adapters/crosschain.ts';
 import type { Cli } from './adapters/agent-wallet.ts';
-import { planningEligibility } from './policy.ts';
+import { fundingPortfolio } from './funding-portfolio.ts';
 import { verifiedCrosschainBalances } from './treasury.ts';
 
 const Hash = z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform(x => x.toLowerCase());
@@ -40,25 +40,8 @@ export function fundingDeficit(state: State, now = Date.now()): string {
 }
 
 export function fundingDeficitForDecisions(state: State, decisions: Decision[], now = Date.now()): string {
-  if (state.paused || !state.policy.enabled || Date.parse(state.policy.authorityExpiresAt) <= now || state.intents.some(isPending) || state.bridgeIntents.some(isBridgePending)) return '0';
-  const alreadySpent = state.intents.filter(i => ['SETTLED', 'SIMULATED'].includes(i.status)).reduce((n, i) => n + BigInt(i.amount), 0n);
-  let budget = BigInt(state.policy.totalBudget) - alreadySpent;
-  if (budget <= 0n) return '0';
-  let selected = 0n, selectedCount = 0n;
-  for (const decision of decisions) {
-    if (!['PAY_NOW', 'FUND_ARC'].includes(decision.action)) continue;
-    const obligation = state.obligations.find(o => o.id === decision.obligationId && !o.paid&&!o.archived);
-    if (!obligation) continue;
-    const eligibility = planningEligibility(state, obligation, now);
-    const amount = BigInt(obligation.amount);
-    if (!['ALLOW', 'FUNDING_REQUIRED'].includes(eligibility) || amount > budget) continue;
-    selected += amount;
-    selectedCount++;
-    budget -= amount;
-  }
-  if (selected === 0n) return '0';
-  const target = selected + BigInt(state.policy.reserve) + selectedCount * BigInt(state.policy.gasLimit);
-  return (target > BigInt(state.snapshot.balance) ? target - BigInt(state.snapshot.balance) : 0n).toString();
+  if(!state.bridgePolicy.enabled)return '0';
+  return fundingPortfolio(state,decisions.filter(d=>['PAY_NOW','FUND_ARC'].includes(d.action)).map(d=>d.obligationId),now).gapUnits??'0';
 }
 
 export function selectFundingBalances(state: State, now = Date.now()) {

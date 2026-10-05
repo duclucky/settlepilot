@@ -6,6 +6,7 @@ import { availableCrosschainUnits, planningEligibility } from '../policy.ts';
 import { reviewCaseBinding, reviewFingerprint } from '../review-binding.ts';
 import type { ReviewObservation, ReviewFeedback } from '../planning-types.ts';
 import { ModelRequests } from '../model-requests.ts';
+import { fundingPortfolio } from '../funding-portfolio.ts';
 
 const Verdict = z.enum(['ALLOW', 'REVIEW', 'BLOCK']);
 const ChoiceAnswer = z.object({
@@ -56,6 +57,7 @@ export class JevReviewedPlanner implements Planner {
     const cache=new Map<string,ReviewObservation>(),blocked=new Map<string,ReviewObservation>();
     for(let revision=0;revision<=2;revision++){
       const proposed = decisions.filter(d => d.action === 'PAY_NOW' || d.action === 'FUND_ARC');
+      const portfolio=fundingPortfolio(state,proposed.map(d=>d.obligationId),planningAt);
       const issues:ReviewFeedback['issues']=[];
       const pending=proposed.map(d=>{
         const obligation = state.obligations.find(o => o.id === d.obligationId)!;
@@ -67,6 +69,7 @@ export class JevReviewedPlanner implements Planner {
           evidence: state.evidence.filter(e => e.obligationId === d.obligationId),
           deterministicPlanningStatus: planningEligibility(state, obligation, planningAt),
           availableCrosschainUnits: availableCrosschainUnits(state, planningAt),
+          ...(d.action==='FUND_ARC'?{selectedFundingPortfolio:portfolio}:{}),
         };
         const caseBinding=reviewCaseBinding(state,d.obligationId),fingerprint=reviewFingerprint(item,`${this.model}:${this.endpoint}`);
         const observation=blocked.get(caseBinding)??cache.get(fingerprint)??this.base.lookupReview?.(fingerprint,caseBinding);

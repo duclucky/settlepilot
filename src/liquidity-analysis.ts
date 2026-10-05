@@ -46,6 +46,9 @@ export function analyzeLiquidity(state: State, now = Date.now()) {
     arc: { observedUnits: state.snapshot.balance, observationFresh: arcFresh, observedAt: state.snapshot.observedAt,
       afterReserveUnits: arcFresh ? positive(arc - reserve).toString() : null, reserveUnits: state.policy.reserve, gasCeilingPerPayoutUnits: state.policy.gasLimit },
     remainingBudgetUnits: positive(BigInt(state.policy.totalBudget) - spent).toString(), pendingOperations,
+    // Ordering facts, not an automatically selected payment portfolio.
+    deadlineOrder: [...open].sort((a,b)=>Date.parse(a.due)-Date.parse(b.due)||a.id.localeCompare(b.id))
+      .map(o=>({obligationId:o.id,due:o.due,overdue:Date.parse(o.due)<=now,policyResult:evaluate(state,o,now)})),
     sources, conditionalMintOneBridgePerSourceUnits: conditionalFunding.toString(),
     unavailableSourceChains: state.bridgePolicy.sourceChains.filter(chain => !sources.some(s => s.sourceChain === chain)),
     horizons, expectedReceipts,

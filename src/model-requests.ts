@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import type {Store} from './store.ts';
-import {reserveInput,type InputPrefix} from './model-input-reservation.ts';
+import {reserveInput,measuredReplayPrefix,type InputPrefix} from './model-input-reservation.ts';
 
 export type ModelProvider='planner'|'reviewer';
 export interface ModelUsage {inputTokens:number;cachedTokens:number;outputTokens:number;reasoningTokens:number}
@@ -9,7 +9,7 @@ export interface ModelRequestRecord {
  id:string;runId:string;provider:ModelProvider;model:string;at:number;completedAt?:number;latencyMs?:number;
  status:'RESERVED'|'COMPLETE'|'REJECTED'|'UNKNOWN';reservedTokens:number;reservedCostNanoUsd?:number;
  usage?:ModelUsage;estimatedCostNanoUsd?:number;error?:string;
- inputPrefix?:InputPrefix;inputReservation?:{method:'BYTE_BOUND'|'OBSERVED_PREFIX';inputTokens:number;anchorId?:string};
+ inputPrefix?:InputPrefix;replayPrefix?:InputPrefix;inputReservation?:{method:'BYTE_BOUND'|'OBSERVED_PREFIX';inputTokens:number;anchorId?:string};
 }
 export interface ModelControl {requests:ModelRequestRecord[];blocks:Partial<Record<ModelProvider,{code:string;at:number;retryAt?:number}>>;resetVersion?:number;configurationVersion?:number;archivedRequests?:number;limits?:ModelLimits}
 export interface ModelLimits {maxRunRequests:number;maxDayRequests:number;maxRunTokens:number;maxDayTokens:number;maxRunCostNanoUsd:number;maxDayCostNanoUsd:number}
@@ -85,6 +85,7 @@ export class ModelRequests {
  }
  async request(provider:ModelProvider,model:string,url:string,init:RequestInit,transport:typeof fetch,runId:string=randomUUID()):Promise<Response>{
   if(typeof init.body!=='string')throw new ModelRequestError('MODEL_CONFIG_FAILED');
+   const requestBody=init.body;
    if(init.signal?.aborted)throw new ModelRequestError('MODEL_TIMEOUT');
    let id:string;
    try{id=this.reserve(provider,model,url,runId,init.body);}catch(error){
@@ -107,7 +108,7 @@ export class ModelRequests {
     }
    }
    if(response.ok){
-    const u=usage(body?.usage);this.change(c=>{Object.assign(c.requests.find(r=>r.id===id)!,{status:u?'COMPLETE':'UNKNOWN',usage:u,estimatedCostNanoUsd:u?cost(provider,model,u):undefined,completedAt:this.clock(),latencyMs:this.clock()-at});const block=c.blocks[provider];if(block?.retryAt!==undefined&&block.retryAt<=at)delete c.blocks[provider];});
+    const u=usage(body?.usage);this.change(c=>{const record=c.requests.find(r=>r.id===id)!;Object.assign(record,{status:u?'COMPLETE':'UNKNOWN',usage:u,estimatedCostNanoUsd:u?cost(provider,model,u):undefined,replayPrefix:u?measuredReplayPrefix(provider,model,url,requestBody,body,record.inputPrefix):undefined,completedAt:this.clock(),latencyMs:this.clock()-at});const block=c.blocks[provider];if(block?.retryAt!==undefined&&block.retryAt<=at)delete c.blocks[provider];});
     return response;
    }
    const code=errorCode(response.status,body);

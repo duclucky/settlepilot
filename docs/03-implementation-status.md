@@ -33,3 +33,9 @@ Setup supports reviewed, version-bound spending grants/revocation, saved sending
 Selected Hermes patterns are implemented in TypeScript: frozen per-evaluation instructions/policy/skills/memory, hash manifests, lazy repeat skill reads and duplicate memory suppression. The separate reference checkout is pinned in [selection record](37-hermes-backend-selection.md). Memory never grants spending authority.
 
 The [LLM loop repair](38-llm-loop-control.md) suppresses unchanged rechecks, canonicalizes repeated tools, stops stalled/error loops, defers temporary provider retries and replaces recursive CCTP replanning with durable jobs. New financial facts, owner delays/approval expiry and deadline transitions remain eligible. Verification: 282 offline tests and build; desktop/mobile fixture checks; no live provider call or transfer. Publication is verified separately after upload.
+
+## Measured reasoning replay — 2026-10-05
+
+The request meter now recognizes exact provider-emitted reasoning/tool history using durable hashes and confirmed usage. New or changed opaque data still uses byte reservation; budgets, output allowance and anti-loop guards are unchanged. The actual planner completes context/source-selection/finish offline within three requests and USD 0.10. See [scope, failure reproduction and verification](39-model-replay-reservation.md). This increment makes no live settlement claim.
+
+Verification: 286 offline tests and production build; matching hosted code passes 337 tests and both builds. No live provider or testnet action was performed for this optimization.

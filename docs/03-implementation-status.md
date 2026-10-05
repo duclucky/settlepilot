@@ -45,3 +45,7 @@ Verification: 286 offline tests and production build; matching hosted code passe
 Explicit LLM-selected FUND_ARC targets now share one validated deficit calculation across planner, preview and CCTP, including individually ALLOW targets that collectively lack cash. Zero-gap and invalid portfolios cannot authorize funding. Infeasible payout feedback exposes a conditional funding alternative; PAY_NOW still requires existing Arc cash. Funding targets persist as goals through mint without an extra model tool call. Deadline facts and settlement instructions make overdue/earliest-due priority explicit; trusted business reasons can justify a different order.
 
 Verification: 296 offline installer tests and build; hosted counterpart 347 tests and both builds. See [scope and verification](40-portfolio-funding.md). No live provider or financial operation was run for this repair; real model priority choices remain unverified.
+
+## Verified goal completion — 2026-10-05
+
+Payment reconciliation now updates goal status atomically and matches the settled receipt against the goal's original obligation version. The one-step paid version increment no longer supersedes the goal; genuine amendments, unverified outcomes and mismatched financial identity still cannot complete it. Existing incorrectly superseded settled goals can be refreshed without another transaction or model request. Verification: 300 offline installer tests and build; hosted counterpart 351 tests and both builds. See [scope and regression evidence](43-goal-completion.md).

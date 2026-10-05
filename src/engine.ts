@@ -237,6 +237,7 @@ export class Engine {
           if (snapshot) s.snapshot = snapshot;
           else { s.snapshot.balance = (BigInt(s.snapshot.balance) - BigInt(i.amount)).toString(); s.snapshot.observedAt = new Date().toISOString(); }
           event(s, i.status, `${i.obligationId}: ${i.id}`);
+          refreshGoalPlans(s);
         });
       } catch {
         this.store.change(s => { const i = s.intents.find(i => i.id === intent.id)!; if (isPending(i)) { i.status = 'EXECUTION_UNKNOWN'; i.error = 'RECEIPT_OR_PROVIDER_UNVERIFIED'; } });

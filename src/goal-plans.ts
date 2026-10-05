@@ -51,21 +51,30 @@ export function refreshGoalPlans(s:State) {
   const key=decisionKey(s);
   for(const p of s.autonomy?.plans??[]){
     const o=s.obligations.find(o=>o.id===p.obligationId);
+    // Reconciliation binds its receipt to the pre-payment version, then marks
+    // the obligation paid and increments that version exactly once. Do not
+    // mistake that settlement transition for an amendment. Same-version paid
+    // records are retained for compatibility with existing verified fixtures.
+    const proof=o?.paid&&!o.archived&&(o.version===p.obligationVersion||o.version===p.obligationVersion+1)
+      ?s.intents.find(i=>i.obligationId===o.id&&i.obligationVersion===p.obligationVersion&&i.policyVersion===p.policyVersion&&i.amount===o.amount&&i.recipient===o.recipient&&i.sender===s.policy.sender&&i.chainId===CHAIN_ID&&
+        (i.status==='SETTLED'&&s.mode==='testnet'&&!!i.hash||i.status==='SIMULATED'&&s.mode==='simulation')):undefined;
+    for(const step of p.steps.filter(step=>step.action==='PAY_NOW')){
+      step.status=proof?(proof.status==='SETTLED'?'VERIFIED':'SIMULATED'):'PLANNED';
+      step.proofId=proof?.id;
+    }
+    if(proof){p.status='COMPLETED';p.needsReassessment=false;continue;}
     if(!o||o.archived||o.version!==p.obligationVersion||s.policy.version!==p.policyVersion||s.bridgePolicy.version!==p.bridgePolicyVersion){p.status='SUPERSEDED';p.needsReassessment=true;continue;}
     p.needsReassessment=p.contextKey!==key;
-    const proof=s.intents.find(i=>i.obligationId===o.id&&i.obligationVersion===o.version&&i.policyVersion===p.policyVersion&&i.amount===o.amount&&i.recipient===o.recipient&&i.sender===s.policy.sender&&i.chainId===CHAIN_ID&&(i.status==='SETTLED'&&!!i.hash||i.status==='SIMULATED'&&s.mode==='simulation'));
     const runIds=new Set(p.history.filter(h=>h.action==='FUND_ARC').map(h=>h.runId));
     const savedProofs=new Set(p.steps.filter(step=>step.action==='FUND_ARC'&&step.proofId).map(step=>step.proofId));
     const bridges=s.bridgeIntents.filter(i=>!!i.runId&&(runIds.has(i.runId)||savedProofs.has(i.id))&&i.sourceWallet===s.policy.sender&&i.recipient===s.policy.sender&&i.destinationChain==='ARC-TESTNET'&&i.policyVersion===p.bridgePolicyVersion);
     for(const step of p.steps){
       step.status='PLANNED';step.proofId=undefined;
-      if(step.action==='PAY_NOW'&&o.paid&&proof){step.status=proof.status==='SETTLED'?'VERIFIED':'SIMULATED';step.proofId=proof.id;}
       if(step.action==='FUND_ARC'){
         const bridge=bridges.find(i=>i.sourceChain===step.sourceChain&&i.status==='SETTLED'&&!!i.mintHash);
         if(bridge){step.status='VERIFIED';step.proofId=bridge.id;}
       }
     }
-    if(o.paid&&proof){p.status='COMPLETED';p.needsReassessment=false;continue;}
     if(s.intents.some(i=>i.obligationId===o.id&&isPending(i))||bridges.some(isBridgePending)){p.status='RECONCILING';continue;}
     if(s.autonomy?.requests.some(r=>r.scope===o.id&&r.status==='OPEN')||s.evidenceRequests.some(r=>r.obligationId===o.id&&r.status==='OPEN')||s.agentNotifications.some(n=>n.status==='OPEN'&&n.issues.some(i=>i.obligationId===o.id))){p.status='OWNER_REVIEW';continue;}
     const wait=s.autonomy?.waits?.filter(w=>w.obligationId===o.id).at(-1);

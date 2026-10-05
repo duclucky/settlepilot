@@ -14,4 +14,4 @@ The hosted Agent remains in simulation with operations paused and financial exec
 
 The downloadable installer now includes shared primary/reviewer usage budgets, durable SQLite request history and archive, bounded recovery of unchanged evaluations, batched tool prerequisites, incomplete-response rejection and disabled-model financial guards. Fresh model settings default to GPT-5.4 mini; existing settings are retained. See [update scope and verification](34-installer-agent-update.md) and [installation and usage](../README.md).
 
-The installer checkout passes 252 offline tests and the TypeScript/Vite build. The Windows launcher files are unchanged and pass static validation; the product was not started on this PC. No live model, Telegram or testnet execution was performed for this release.
+Both the installer checkout and a fresh credential-free GitHub clone pass 252 offline tests and the TypeScript/Vite build. The Windows launcher files are unchanged and pass static validation; the product was not started on this PC. No live model, Telegram or testnet execution was performed for this release.

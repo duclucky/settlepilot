@@ -20,9 +20,11 @@ test('preview tool compares conditional funding and payout without changing mone
     {name:'preview_plan',args:{steps:[{obligationId:'A',action:'FUND_ARC',sourceChain:'BASE-SEPOLIA'},{obligationId:'A',action:'PAY_NOW',sourceChain:null}]}},
     {name:'finish',args:{decisions:[{obligationId:'A',action:'HOLD',reason:'Inspect projected costs.',evidenceIds:[]}]}}];
   const transport=(async(_url,init)=>{const body=JSON.parse(init!.body as string);const output=body.input.find((i:any)=>i.type==='function_call_output'&&i.call_id==='5');if(output)preview=JSON.parse(output.output);
-    const c=sequence[Math.min(calls++,sequence.length-1)];return new Response(JSON.stringify({output:[{type:'function_call',name:c.name,call_id:String(calls),arguments:JSON.stringify(c.args)}]}));}) as typeof fetch;
+    assert.ok(calls<sequence.length,'Finite offline script; never retry the last tool.');
+    const c=sequence[calls++];return new Response(JSON.stringify({usage:{input_tokens:1000,output_tokens:100},output:[{type:'function_call',name:c.name,call_id:String(calls),arguments:JSON.stringify(c.args)}]}));}) as typeof fetch;
   try{
     await new ModelPlanner('fixture','fixture',transport,new AgentWorkspace(store)).plan(store.read());
+    assert.equal(calls,6);
     assert.equal(preview.kind,'CONSERVATIVE_PROJECTION');assert.equal(preview.steps[0].fundingUnits,money('3.6'));assert.equal(preview.steps[1].projectedArcBalance,money('0.5'));
     assert.equal(preview.steps[1].conditionalOnVerifiedMint,true);assert.equal(store.read().snapshot.balance,money('1'));assert.equal(store.read().intents.length+store.read().bridgeIntents.length,0);
   }finally{store.close();}

@@ -6,8 +6,9 @@ import { AutonomousOperations } from './operations.ts';
 
 try {
   const current = runtime(); current.engine.recoverPrepared(); current.bridge?.recoverPrepared();
-  const telegram = new TelegramNotificationService(current.store);
-  const llm = new LlmSettingsService(current.store, current.engine);
+  const envFile = process.env.TAMEION_ENV_FILE ?? '.env';
+  const telegram = new TelegramNotificationService(current.store, { envFile });
+  const llm = new LlmSettingsService(current.store, current.engine, { envFile });
   const operations=new AutonomousOperations(current,telegram);
   const port = Number(process.env.PORT ?? 4317);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('INVALID_PORT');

@@ -78,7 +78,7 @@ export function validateBridgeStatus(value: unknown, recipientAddress: string, s
   return s.forwardTxHash;
 }
 
-interface Options { enabled: boolean; responseTimeoutMs?: number }
+interface Options { enabled: boolean; responseTimeoutMs?: number; decisionEnabled?: () => boolean }
 export class CctpBridge {
   executionGuard?: () => boolean;
   private quotes = new Map<string, { fee: string; totalBurn: string; at: number }>();
@@ -105,7 +105,7 @@ export class CctpBridge {
   }
   private async fundAvailable(runId?: string, receivableId?: string): Promise<string | undefined> {
     const before = this.store.read();
-    if (!this.options.enabled || !before.bridgePolicy.enabled) {
+    if (!this.options.enabled || !before.bridgePolicy.enabled || this.options.decisionEnabled?.() === false) {
       this.store.change(s => event(s, 'CCTP_AWAITING_AUTHORITY', receivableId ?? 'treasury inventory'));
       return;
     }
@@ -156,7 +156,7 @@ export class CctpBridge {
     const intent = this.store.change(s => {
       const p = s.bridgePolicy;
       const inventory = selectFundingBalances(s).find(item => item.sourceChain === chain);
-      if (!inventory || !this.options.enabled || !p.enabled || !p.sourceChains.includes(chain)) throw new Error('BRIDGE_AUTHORITY_DISABLED');
+      if (!inventory || !this.options.enabled || this.options.decisionEnabled?.() === false || !p.enabled || !p.sourceChains.includes(chain)) throw new Error('BRIDGE_AUTHORITY_DISABLED');
       const currentRun = runId ? s.runs.find(run => run.id === runId && run.status === 'DONE' && run.executionStatus === 'PLANNED') : undefined;
       const currentAmount = currentRun ? fundingDeficitForDecisions(s, currentRun.decisions) : fundingDeficit(s);
       if ((runId && (!currentRun || currentRun.financialVersion !== s.financialVersion || currentRun.policyVersion !== s.policy.version)) || currentAmount !== amount || s.intents.some(isPending) || s.bridgeIntents.some(isBridgePending) || BigInt(transferAmount) > BigInt(currentAmount) || BigInt(transferAmount) > BigInt(p.maxAmount) || BigInt(fee) > BigInt(p.maxFee)) throw new Error('BRIDGE_POLICY_CHANGED');
@@ -171,7 +171,7 @@ export class CctpBridge {
     const quote = this.quotes.get(intent.id);
     this.store.change(s => {
       const i = s.bridgeIntents.find(x => x.id === intent.id)!;
-      if (this.executionGuard && !this.executionGuard() || !quote || Date.now() - quote.at > 60_000 || i.status !== 'PREPARED' || i.policyVersion !== s.bridgePolicy.version || !s.bridgePolicy.enabled || !this.options.enabled || quote.fee !== i.fee || quote.totalBurn !== i.totalBurn) throw new Error('BRIDGE_QUOTE_OR_AUTHORITY_CHANGED');
+      if (this.options.decisionEnabled?.() === false || this.executionGuard && !this.executionGuard() || !quote || Date.now() - quote.at > 60_000 || i.status !== 'PREPARED' || i.policyVersion !== s.bridgePolicy.version || !s.bridgePolicy.enabled || !this.options.enabled || quote.fee !== i.fee || quote.totalBurn !== i.totalBurn) throw new Error('BRIDGE_QUOTE_OR_AUTHORITY_CHANGED');
       i.status = 'DISPATCHING'; i.dispatchAt = new Date().toISOString(); event(s, 'CCTP_DISPATCHED', i.id);
     });
     this.quotes.delete(intent.id);

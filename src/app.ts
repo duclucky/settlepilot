@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { Address, CHAIN_ID, isPending, money, SOURCE_CHAIN_NAMES } from './domain.ts';
 import { event } from './store.ts';
+import { ModelRequests, modelLimits } from './model-requests.ts';
 import { evaluate, planningEligibility } from './policy.ts';
 import type { Runtime } from './config.ts';
 import { processVerifiedCrosschainRevenue } from './crosschain-revenue.ts';
@@ -79,9 +80,23 @@ export function createApp(runtime: Runtime, token = randomBytes(32).toString('he
     if (!services.llm) throw new Error('LLM_SETTINGS_UNAVAILABLE');
     res.json(services.llm.settings());
   });
+  app.get('/api/model-usage',(_req,res)=>res.json({limits:modelLimits(),...new ModelRequests(store).snapshot(),costLabel:'Estimated standard text pricing, not provider billing. Unknown outcomes retain reservations; unknown provider prices are not treated as free.'}));
+  app.get('/api/model-usage/archive',(req,res)=>{
+    const page=z.object({after:z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),limit:z.coerce.number().int().min(1).max(200).default(100)}).strict().parse(req.query);
+    res.json(store.modelArchive(page.after,page.limit));
+  });
+  app.post('/api/model-usage/reset-blocks',(req,res)=>{
+    z.object({confirmed:z.literal(true)}).strict().parse(req.body);
+    if(store.read().runs.some(r=>r.status==='RUNNING'))throw new Error('AGENT_RUN_IN_PROGRESS');
+    new ModelRequests(store).reset();store.change(s=>event(s,'MODEL_BLOCKS_RESET','owner; usage and pause preserved'));
+    if(!store.read().paused&&store.read().autonomy?.enabled)services.scheduler?.wake('MODEL_CONNECTION_RESET',`model-reset:${randomUUID()}`);
+    res.json({ok:true,paused:store.read().paused});
+  });
   app.post('/api/llm-settings', (req, res) => {
     if (!services.llm) throw new Error('LLM_SETTINGS_UNAVAILABLE');
-    res.json(services.llm.configure(req.body));
+    const settings=services.llm.configure(req.body);
+    if(settings.active&&!store.read().paused&&store.read().autonomy?.enabled)services.scheduler?.wake('MODEL_CONFIGURATION_CHANGED',`model-config:${randomUUID()}`);
+    res.json(settings);
   });
   app.post('/api/wallet/check', async (_req, res) => {
     if (store.read().mode !== 'testnet') throw new Error('TESTNET_ONLY');

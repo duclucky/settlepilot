@@ -14,6 +14,9 @@ export function syncActionRequests(store:Store,now=Date.now()) {
     const a=s.autonomy!;
     const unknownReviews=new Set<string>();
     for(const r of a.requests.filter(r=>r.status==='OPEN')) {
+      if(r.legacyId?.startsWith('job:') && a.jobs.some(j=>`job:${j.id}`===r.legacyId&&j.status==='DONE'&&j.error==='EVALUATION_RECOVERED')) {
+        r.status='SUPERSEDED';continue;
+      }
       if(r.legacyId===`unknown:${r.scope}`){
         if(unknownReviews.has(r.legacyId)){r.status='SUPERSEDED';continue;}
         unknownReviews.add(r.legacyId);

@@ -63,6 +63,7 @@ export const DecisionSchema = z.object({
 }).strict();
 export type Decision = z.infer<typeof DecisionSchema>;
 export interface Run {
+  failureCode?: string;
   decisionRecord?: DecisionRecord;
   decisionRecordSummary?: { sha256: string; capturedAt: string };
   id: string; createdAt: string; source: string; status: 'RUNNING' | 'DONE' | 'ERROR' | 'AWAITING_USER'; decisions: Decision[];
@@ -113,6 +114,7 @@ export interface BridgeIntent {
 }
 export interface Event { id: string; at: string; type: string; detail: string }
 export interface State {
+  modelControl?: import('./model-requests.ts').ModelControl;
   autonomy?: AutonomyState;
   version: number; financialVersion: number; mode: 'simulation' | 'testnet'; paused: boolean; policy: Policy;
   snapshot: Snapshot; obligations: Obligation[]; evidence: Evidence[]; intents: Intent[];
@@ -132,6 +134,8 @@ export interface PaymentGateway {
   recover?(intent: Intent, providerId: string): Promise<void>;
 }
 export interface Planner {
+  financialEnabled?: boolean;
+  modelRequests?: import('./model-requests.ts').ModelRequests;
   name: string; plan(state: State, runId?: string): Promise<Decision[]>;
   reconsider?(state:State,feedback:ReviewFeedback,runId?:string):Promise<Decision[]>;
   lookupReview?(fingerprint:string,caseBinding:string):ReviewObservation|undefined;

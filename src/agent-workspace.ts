@@ -10,8 +10,10 @@ import { planningEligibility } from './policy.ts';
 import type { AgentUserDecisionRequest } from './agent-escalation.ts';
 import type { WaitCondition } from './autonomy-types.ts';
 import type { ReviewObservation } from './planning-types.ts';
-import { recordGoalPlan, refreshGoalPlans } from './goal-plans.ts';
+import type { State } from './domain.ts';
+import { recordGoalPlan, refreshGoalPlans, PlanInput } from './goal-plans.ts';
 import { reviewCaseBinding } from './review-binding.ts';
+import { ModelRequests } from './model-requests.ts';
 
 const SkillName = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(80);
 const MemoryInput = z.discriminatedUnion('action', [
@@ -34,20 +36,36 @@ function frontmatter(text: string) {
 }
 
 export class AgentWorkspace {
+  readonly modelRequests:ModelRequests;
   readonly root: string;
-  constructor(private readonly store?: Store, root = resolve('agent')) { this.root = root; }
+  constructor(private readonly store?: Store, root = resolve('agent')) { this.root = root; this.modelRequests=new ModelRequests(store); }
   get memoryEnabled() { return !!this.store; }
-  planningContext() {
+  planningContext(state?: State) {
     if(!this.store)return {plans:[],reviews:[]};
     return this.store.change(s=>{
       refreshGoalPlans(s);const plans=s.autonomy!.plans??[];
-      return {plans:structuredClone([...plans.filter(p=>!['SUPERSEDED','COMPLETED'].includes(p.status)),...plans.filter(p=>['SUPERSEDED','COMPLETED'].includes(p.status)).slice(-5)]),reviews:structuredClone((s.autonomy!.reviews??[]).slice(-30))};
+      if(!state)return {plans:structuredClone([...plans.filter(p=>!['SUPERSEDED','COMPLETED'].includes(p.status)),...plans.filter(p=>['SUPERSEDED','COMPLETED'].includes(p.status)).slice(-5)]),reviews:structuredClone((s.autonomy!.reviews??[]).slice(-30))};
+      // Persist the complete history, but expose only the current portfolio.
+      // Do not limit reviews by recency: an old current BLOCK still matters.
+      const openIds=new Set(state.obligations.filter(o=>!o.paid&&!o.archived).map(o=>o.id));
+      const bindings=new Map([...openIds].map(id=>[id,reviewCaseBinding(state,id)]));
+      return {
+        plans:structuredClone(plans.filter(p=>openIds.has(p.obligationId)&&p.status!=='SUPERSEDED').map(p=>({...p,history:p.history.slice(-1)}))),
+        reviews:structuredClone((s.autonomy!.reviews??[]).filter(r=>bindings.get(r.obligationId)===r.caseBinding)),
+      };
     });
   }
   recordPlan(raw:unknown) {
     if(!this.store)throw new Error('PLAN_STORAGE_UNAVAILABLE');
     if(secretLike.test(JSON.stringify(raw)))throw new Error('SECRET_LIKE_PLAN_REJECTED');
     return this.store.change(s=>recordGoalPlan(s,raw));
+  }
+  recordPlans(raw:unknown) {
+    if(!this.store)throw new Error('PLAN_STORAGE_UNAVAILABLE');
+    const plans=PlanInput.array().min(1).max(20).parse(raw);
+    if(new Set(plans.map(p=>p.obligationId)).size!==plans.length)throw new Error('DUPLICATE_CANDIDATE');
+    if(secretLike.test(JSON.stringify(plans)))throw new Error('SECRET_LIKE_PLAN_REJECTED');
+    return this.store.change(s=>plans.map(plan=>recordGoalPlan(s,plan)));
   }
   lookupReview(fingerprint:string,caseBinding:string) {
     const observations=this.store?.read().autonomy?.reviews??[];

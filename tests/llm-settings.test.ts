@@ -84,3 +84,25 @@ test('LLM settings API is session-protected and never returns API keys', async (
     store.close(); rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('model usage and block reset are owner-only and reset does not resume or erase usage',async()=>{
+ const s=fixture();s.paused=true;const store=new Store(':memory:',s),engine=new Engine(store,new SimulationGateway(store),new RulesPlanner());
+ store.change(s=>s.modelControl={requests:[{id:'meter',runId:'r',provider:'planner',model:'gpt-5.4-mini',at:Date.now(),status:'UNKNOWN',reservedTokens:8000}],blocks:{planner:{code:'MODEL_CREDIT_EXHAUSTED',at:Date.now()}}});
+ const runtime={store,engine,arc:undefined,sources:undefined,bridge:undefined,bridgeEnabled:false,sendEnabled:false,useModel:false,walletProvider:'simulation'}as const;
+ const server=createApp(runtime,'owner-session').listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const base=`http://127.0.0.1:${(server.address()as any).port}`;
+ const headers={Authorization:'Bearer owner-session','Content-Type':'application/json'};
+ try{assert.equal((await fetch(base+'/api/model-usage')).status,401);assert.equal((await fetch(base+'/api/model-usage/reset-blocks',{method:'POST',headers,body:'{}'})).status,400);const usage=await(await fetch(base+'/api/model-usage',{headers})).json();assert.equal(usage.requests.length,1);const result=await(await fetch(base+'/api/model-usage/reset-blocks',{method:'POST',headers,body:'{"confirmed":true}'})).json();assert.equal(result.paused,true);assert.equal(store.read().paused,true);assert.equal(store.read().modelControl!.requests.length,1);assert.deepEqual(store.read().modelControl!.blocks,{});}finally{await new Promise<void>(r=>server.close(()=>r()));store.close();}
+});
+
+
+test('fresh local model settings default to mini without replacing a saved model', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'settlepilot-model-default-'));
+  const envFile = join(directory, '.env');
+  const current = setup(envFile);
+  try {
+    assert.equal(current.service.settings().llmModel, 'gpt-5.4-mini');
+    assert.equal(current.service.settings().active, false);
+    current.env.OPENAI_MODEL = 'owner-selected-model';
+    assert.equal(current.service.settings().llmModel, 'owner-selected-model');
+  } finally { current.store.close(); rmSync(directory, { recursive: true, force: true }); }
+});

@@ -9,3 +9,9 @@ The current shared product increment includes conservative deadline liquidity an
 The separate [public showcase](https://settlepilot-mu.vercel.app) is deployed on Vercel with a continuous private VPS backend. Its Linux release passed 234 tests and builds, preserving saved state and settings. Public HTTP/privacy checks pass; the installation page links to this repository. The function build's Node typings diagnostic has been resolved.
 
 The hosted Agent remains in simulation with operations paused and financial execution/daily admission disabled. Installing this repo does not inherit demo credentials or grant financial authority. Configure your own providers, Circle testnet session, sender/recipient policy, reserves, budget and finite authority before enabling real testnet actions. Existing-database policy renewal/migration, a stable hosted observer origin and real pilot traction remain outstanding; do not infer them from a build or a simulated result.
+
+## Installer update — 2026-10-05
+
+The downloadable installer now includes shared primary/reviewer usage budgets, durable SQLite request history and archive, bounded recovery of unchanged evaluations, batched tool prerequisites, incomplete-response rejection and disabled-model financial guards. Fresh model settings default to GPT-5.4 mini; existing settings are retained. See [update scope and verification](34-installer-agent-update.md) and [installation and usage](../README.md).
+
+The installer checkout passes 252 offline tests and the TypeScript/Vite build. The Windows launcher files are unchanged and pass static validation; the product was not started on this PC. No live model, Telegram or testnet execution was performed for this release.

@@ -50,7 +50,7 @@ test('real model tool loop receives review feedback and chooses an operational q
   ];
   const transport=(async(_url,init)=>{
     const body=JSON.parse(init!.body as string);seenFeedback ||= JSON.parse(body.input[0].content).reviewFeedback?.issues?.[0]?.obligationId==='A';
-    const c=sequence[Math.min(calls++,sequence.length-1)];return new Response(JSON.stringify({output:[{type:'function_call',name:c.name,call_id:String(calls),arguments:JSON.stringify(c.args)}]}));
+    const c=sequence[Math.min(calls++,sequence.length-1)];return new Response(JSON.stringify({usage:{input_tokens:1000,output_tokens:100},output:[{type:'function_call',name:c.name,call_id:String(calls),arguments:JSON.stringify(c.args)}]}));
   }) as typeof fetch;
   try{
     const base=new ModelPlanner('fixture','fixture',transport,new AgentWorkspace(store));

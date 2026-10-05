@@ -50,7 +50,7 @@ test('funding action dispatches one bridge on the selected chain and leaves payo
 });
 test('model rejects premature payment and must choose the funding replacement itself',async()=>{
   const sequence=[{name:'read_skill',args:{name:'settle-obligations'}},{name:'read_skill',args:{name:'fund-arc-with-cctp'}},{name:'inspect_treasury',args:{}},{name:'check_policy',args:{obligationIds:['A']}},{name:'choose_funding_source',args:{sourceChain:'BASE-SEPOLIA'}},{name:'finish',args:{decisions:[{...proposal,action:'PAY_NOW',fundingSourceChain:undefined}]}},{name:'finish',args:{decisions:[{...proposal,fundingSourceChain:undefined}]}}];let round=0;
-  const transport=(async(_url,init)=>{if(round===6)assert.match(init!.body as string,/PAY_NOW_REJECTED_FUNDING_REQUIRED/);const call=sequence[Math.min(round++,sequence.length-1)];return new Response(JSON.stringify({output:[{type:'function_call',name:call.name,call_id:String(round),arguments:JSON.stringify(call.args)}]}));}) as typeof fetch;
+  const transport=(async(_url,init)=>{if(round===6)assert.match(init!.body as string,/PAY_NOW_REJECTED_FUNDING_REQUIRED/);const call=sequence[Math.min(round++,sequence.length-1)];return new Response(JSON.stringify({usage:{input_tokens:1000,output_tokens:100},output:[{type:'function_call',name:call.name,call_id:String(round),arguments:JSON.stringify(call.args)}]}));}) as typeof fetch;
   const [decision]=await new ModelPlanner('fixture-key','fixture-model',transport).plan(context());assert.equal(decision.action,'FUND_ARC');assert.equal(round,7);
 });
 test('a multi-round funding plan keeps its verified input snapshot and still needs backend revalidation',async()=>{

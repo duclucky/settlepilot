@@ -56,7 +56,9 @@ test('funding targets share the payout budget and the model revises its selectio
   const transport=(async(_url,init)=>{
     const body=JSON.parse(init!.body as string);initial??=JSON.parse(body.input[0].content);
     outputs.push(...body.input.filter((x:any)=>x.type==='function_call_output').map((x:any)=>JSON.parse(x.output)));
-    const call=sequence[index++];return new Response(JSON.stringify({output:[{type:'function_call',name:call.name,call_id:String(index),arguments:JSON.stringify(call.args)}]}));
+    // This scripted provider reports fixture usage, so the portfolio test does
+    // not exhaust conservative unknown-usage reservations before its revision.
+    const call=sequence[index++];return new Response(JSON.stringify({usage:{input_tokens:1000,output_tokens:100},output:[{type:'function_call',name:call.name,call_id:String(index),arguments:JSON.stringify(call.args)}]}));
   }) as typeof fetch;
   const result=await new ModelPlanner('test','scripted',transport).plan(s);
   assert.deepEqual(result.map(d=>d.action),['FUND_ARC','HOLD']);

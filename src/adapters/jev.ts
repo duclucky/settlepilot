@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import type { Decision, Planner, State } from '../domain.ts';
 import { validateDecisions } from '../planner.ts';
 import { availableCrosschainUnits, planningEligibility } from '../policy.ts';
 import { reviewCaseBinding, reviewFingerprint } from '../review-binding.ts';
 import type { ReviewObservation, ReviewFeedback } from '../planning-types.ts';
+import { ModelRequests } from '../model-requests.ts';
 
 const Verdict = z.enum(['ALLOW', 'REVIEW', 'BLOCK']);
 const ChoiceAnswer = z.object({
@@ -32,6 +34,7 @@ function addReason(reason: string, suffix: string) {
 }
 
 export class JevReviewedPlanner implements Planner {
+  readonly modelRequests:ModelRequests;
   readonly name: string;
   constructor(
     private readonly base: Planner,
@@ -43,9 +46,11 @@ export class JevReviewedPlanner implements Planner {
   ) {
     if (minimumConfidence < 0.5 || minimumConfidence > 1) throw new Error('INVALID_JEV_CONFIDENCE');
     this.name = `${base.name} + Jev ${model}`;
+    this.modelRequests=base.modelRequests??new ModelRequests();
   }
 
   async plan(state: State, runId?: string): Promise<Decision[]> {
+    runId??=randomUUID();
     const planningAt = Date.now();
     let decisions = validateDecisions(await this.base.plan(state, runId), state);
     const cache=new Map<string,ReviewObservation>(),blocked=new Map<string,ReviewObservation>();
@@ -71,7 +76,7 @@ export class JevReviewedPlanner implements Planner {
       const missing=pending.filter(p=>!p.observation);
       for(let offset=0;offset<missing.length;offset+=8){
         const batch=missing.slice(offset,offset+8),questions=Object.fromEntries(batch.map((_,index)=>[`decision_${index}`,question]));
-        const response=await this.transport(this.endpoint,{method:'POST',headers:{Authorization:`Bearer ${this.key}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(15000),body:JSON.stringify({state:{items:batch.map(p=>p.item)},model:this.model,questions})});
+        const response=await this.modelRequests.request('reviewer',this.model,this.endpoint,{method:'POST',headers:{Authorization:`Bearer ${this.key}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(15000),body:JSON.stringify({state:{items:batch.map(p=>p.item)},model:this.model,questions})},this.transport,runId);
         if(!response.ok)throw new Error('JEV_REQUEST_FAILED');
         const body=JevResponse.parse(await response.json());
         if(Object.keys(body.answers).length!==batch.length||batch.some((_,index)=>!body.answers[`decision_${index}`]))throw new Error('INVALID_JEV_RESPONSE');

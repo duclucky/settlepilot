@@ -14,9 +14,14 @@ function transport(sequence: { name: string; args: unknown }[], expectedUrl = 'h
     assert.equal(body.store, false); assert.equal(body.parallel_tool_calls, false);
     assert.equal(JSON.stringify(body.input).includes(fixture().policy.sender), false);
     const call = sequence[Math.min(index++, sequence.length - 1)];
-    return new Response(JSON.stringify({ output: [{ type: 'function_call', name: call.name, call_id: `call-${index}`, arguments: JSON.stringify(call.args) }] }));
+    // Scripted fixtures report usage so this behavioral test does not consume
+    // the conservative reservation for an unknown provider outcome each round.
+    return new Response(JSON.stringify({ usage: { input_tokens: 1000, output_tokens: 100 }, output: [{ type: 'function_call', name: call.name, call_id: `call-${index}`, arguments: JSON.stringify(call.args) }] }));
   }) as typeof fetch;
 }
+test('model transport diagnostics distinguish timeout from HTTP errors without recording provider bodies',async()=>{
+ for(const kind of ['timeout','http']as const){const store=new Store(':memory:',fixture());try{const workspace=new AgentWorkspace(store);const send=(async()=>{if(kind==='timeout')throw new DOMException('private provider URL','TimeoutError');return new Response('private provider body',{status:503});})as typeof fetch;await assert.rejects(()=>new ModelPlanner('secret','model',send,workspace).plan(store.read(),'diagnostic'));const entry=store.read().agentToolCalls.find(c=>c.name==='model_request');assert.match(entry?.detail??'',kind==='timeout'?/TIMEOUT/:/MODEL_TEMPORARILY_UNAVAILABLE/);assert.ok(!JSON.stringify(store.read()).includes('private provider'));}finally{store.close();}}
+});
 test('agent reads evidence and validates a tool-produced decision without executing payment', async () => {
   const endpoint = 'https://models.example.test/v1/responses';
   const planner = new ModelPlanner('fake-test-key', 'configured-model', transport([
@@ -152,7 +157,7 @@ test('verified treasury alternative prevents premature owner help and LLM select
   s.crosschainBalances=[{sourceChain:'BASE-SEPOLIA',balance:money('10'),status:'VERIFIED',chainId:84532,block:'1',observedAt:new Date().toISOString()}];
   let round=0;
   const sequence=[{name:'inspect_treasury',args:{}},{name:'check_policy',args:{obligationIds:['A']}},{name:'request_owner_help',args:{obligationId:'A',question:'Please top up Arc?'}},{name:'read_skill',args:{name:'settle-obligations'}},{name:'read_skill',args:{name:'fund-arc-with-cctp'}},{name:'choose_funding_source',args:{sourceChain:'BASE-SEPOLIA'}},{name:'finish',args:{decisions:[{obligationId:'A',action:'FUND_ARC',reason:'Use verified Base funding before payout.',evidenceIds:[]}]}}];
-  const transport=(async(_url,init)=>{if(round===3)assert.match(init!.body as string,/FUNDING_ALTERNATIVE_AVAILABLE/);const call=sequence[round++];return new Response(JSON.stringify({output:[{type:'function_call',name:call.name,call_id:String(round),arguments:JSON.stringify(call.args)}]}));}) as typeof fetch;
+  const transport=(async(_url,init)=>{if(round===3)assert.match(init!.body as string,/FUNDING_ALTERNATIVE_AVAILABLE/);const call=sequence[round++];return new Response(JSON.stringify({usage:{input_tokens:1000,output_tokens:100},output:[{type:'function_call',name:call.name,call_id:String(round),arguments:JSON.stringify(call.args)}]}));}) as typeof fetch;
   const [decision]=await new ModelPlanner('fixture','fixture',transport).plan(s);assert.equal(decision.action,'FUND_ARC');assert.equal(decision.fundingSourceChain,'BASE-SEPOLIA');
 });
 test('a stale planning snapshot does not erase PAY_NOW because execution refreshes it before side effects', async () => {
@@ -194,4 +199,37 @@ test('agent refuses unknown tools, uninspected evidence, extra fields, and endle
     [{name:'read_evidence',args:{obligationIds:['A'],wallet:'hacked'}}],
     [{name:'check_policy',args:{obligationIds:['A']}}],
   ]) await assert.rejects(new ModelPlanner('fake','model',transport(sequence)).plan(fixture()));
+});
+
+test('a valid slow model response survives 36 seconds while a stalled request stays bounded',async(t)=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ t.mock.method(AbortSignal,'timeout',(ms:number)=>{const c=new AbortController();setTimeout(()=>c.abort(new DOMException('bounded','TimeoutError')),ms);return c.signal;});
+ const s=fixture();s.obligations=[s.obligations[1]];s.evidence=[];
+ const send=(async(_url,init)=>new Promise<Response>((resolve,reject)=>{
+  init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true});
+  setTimeout(()=>resolve(new Response(JSON.stringify({output:[{type:'function_call',name:'finish',call_id:'slow',arguments:JSON.stringify({decisions:[{obligationId:'B',action:'HOLD',reason:'Wait for evidence.',evidenceIds:[]}]})}]}))),36_000);
+ }))as typeof fetch;
+ const result=new ModelPlanner('fake','model',send).plan(s);t.mock.timers.tick(36_000);
+ assert.equal((await result)[0].action,'HOLD');
+ const stalled=(async(_url,init)=>new Promise<Response>((_resolve,reject)=>init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true})))as typeof fetch;
+ const failure=assert.rejects(new ModelPlanner('fake','model',stalled).plan(s),/MODEL_TIMEOUT/);
+ t.mock.timers.tick(90_000);await failure;
+});
+
+test('LLM can prepare required skills, evidence and policy in one read-only call',async()=>{
+ const s=fixture();s.obligations=[s.obligations[0]];s.snapshot.balance=money('10');let rounds=0;
+ const send=(async(_url,init)=>{rounds++;const body=JSON.parse(String(init!.body));
+  if(rounds===1)return new Response(JSON.stringify({output:[{type:'function_call',name:'prepare_context',call_id:'context',arguments:JSON.stringify({skillNames:['settle-obligations'],obligationIds:['A']})}]}));
+  assert.match(String(init!.body),/e-a/);assert.match(String(init!.body),/ALLOW/);
+  return new Response(JSON.stringify({output:[{type:'function_call',name:'finish',call_id:'finish',arguments:JSON.stringify({decisions:[{obligationId:'A',action:'PAY_NOW',reason:'Accepted and affordable.',evidenceIds:['e-a']}]})}]}));
+ })as typeof fetch;
+ const result=await new ModelPlanner('fake','model',send).plan(s);assert.equal(result[0].action,'PAY_NOW');assert.equal(rounds,2);
+});
+
+test('a plan without an explicit run ID shares one request budget across tool rounds',async()=>{
+ let count=0;const workspace=new AgentWorkspace();
+ const send=(async()=>{count++;return new Response(JSON.stringify({output:[{type:'function_call',name:'read_skill',call_id:String(count),arguments:JSON.stringify({name:'settle-obligations'})}]}));})as typeof fetch;
+ await assert.rejects(new ModelPlanner('fake','model',send,workspace).plan(fixture()));
+ const records=workspace.modelRequests.snapshot().requests;
+ assert.ok(records.length>1);assert.equal(new Set(records.map(r=>r.runId)).size,1);
 });

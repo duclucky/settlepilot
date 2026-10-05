@@ -22,3 +22,10 @@ export class RulesPlanner implements Planner {
     }));
   }
 }
+
+// Disabling a testnet model must not silently delegate payments to the baseline.
+export class DisabledPlanner implements Planner {
+  name = 'AI disabled — financial decisions paused';
+  financialEnabled = false;
+  async plan(): Promise<Decision[]> { throw new Error('MODEL_DISABLED'); }
+}

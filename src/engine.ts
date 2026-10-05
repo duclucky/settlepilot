@@ -7,6 +7,7 @@ import { validateDecisions } from './planner.ts';
 import { AgentEscalationError, AgentUserDecisionRequired } from './agent-escalation.ts';
 import { recordPlanDecisions, refreshGoalPlans } from './goal-plans.ts';
 import { createDecisionRecord } from './decision-record.ts';
+import { modelFailureCodes } from './model-requests.ts';
 
 export class Engine {
   executionGuard?: () => boolean;
@@ -14,6 +15,9 @@ export class Engine {
 
   setPlanner(planner: Planner) {
     if (this.store.read().runs.some(run => run.status === 'RUNNING')) throw new Error('AGENT_RUN_IN_PROGRESS');
+    if (planner.financialEnabled === false) this.store.change(s => {
+      for (const run of s.runs.filter(r => r.executionStatus === 'PLANNED')) run.executionStatus = 'INVALIDATED';
+    });
     this.planner = planner;
   }
 
@@ -48,6 +52,12 @@ export class Engine {
     this.store.change(s => {
       const run = s.runs.find(r => r.id === id)!;
       const userDecision = error instanceof AgentUserDecisionRequired;
+      if(!userDecision&&!(error instanceof AgentEscalationError)){
+        const codes=new Set([...modelFailureCodes,'MODEL_REQUEST_FAILED','JEV_REQUEST_FAILED','INVALID_TOOL_SEQUENCE','MODEL_TOOL_LIMIT','CIRCLE_AGENT_REQUEST_FAILED','MODE_MISMATCH','INVALID_JEV_RESPONSE']);
+        const code=error instanceof Error&&codes.has(error.message)?error.message:'UNCLASSIFIED_RUN_FAILURE';
+        run.failureCode=code;
+        event(s,'RUN_FAILURE_CODE',`${id}: ${code}`);
+      }
       run.status = userDecision ? 'AWAITING_USER' : 'ERROR'; run.executionStatus = 'INVALIDATED'; run.error = error instanceof AgentEscalationError || userDecision ? 'AGENT_NEEDS_USER_DECISION' : 'RUN_FAILED_CHECK_CONFIGURATION_OR_INPUT'; event(s, userDecision ? 'AGENT_USER_DECISION_REQUESTED' : 'RUN_FAILED', id);
       if (userDecision && !s.agentNotifications.some(notification => notification.runId === id && notification.type === 'USER_DECISION_REQUIRED')) {
         const request = error.request;
@@ -158,7 +168,7 @@ export class Engine {
           const obligation = s.obligations.find(o => o.id === decision.obligationId)!;
           const original = context.obligations.find(o => o.id === obligation.id)!;
           const evidenceChanged = JSON.stringify(s.evidence) !== JSON.stringify(context.evidence);
-          const result = !this.executionEnabled ? 'EXECUTION_DISABLED' : obligation.version !== original.version || evidenceChanged ? 'STALE_DECISION' : evaluate(s, obligation,this.clock());
+          const result = !this.executionEnabled || this.planner.financialEnabled === false ? 'EXECUTION_DISABLED' : obligation.version !== original.version || evidenceChanged ? 'STALE_DECISION' : evaluate(s, obligation,this.clock());
           if (result !== 'ALLOW') {
             event(s, 'POLICY_HOLD', `${obligation.id}: ${result}`); return undefined;
           }
@@ -181,7 +191,7 @@ export class Engine {
             const o = s.obligations.find(o => o.id === intent.obligationId)!;
             const checkState = { ...s, intents: s.intents.filter(other => other.id !== i.id) };
             const check = evaluate(checkState, o,this.clock());
-            if (this.executionGuard && !this.executionGuard() || check !== 'ALLOW' || BigInt(fee) > BigInt(s.policy.gasLimit) || BigInt(fee) < 0n || o.version !== i.obligationVersion || s.policy.version !== i.policyVersion || o.recipient !== i.recipient || o.amount !== i.amount || s.policy.sender !== i.sender || JSON.stringify(s.evidence) !== JSON.stringify(context.evidence)) {
+            if (this.planner.financialEnabled === false || this.executionGuard && !this.executionGuard() || check !== 'ALLOW' || BigInt(fee) > BigInt(s.policy.gasLimit) || BigInt(fee) < 0n || o.version !== i.obligationVersion || s.policy.version !== i.policyVersion || o.recipient !== i.recipient || o.amount !== i.amount || s.policy.sender !== i.sender || JSON.stringify(s.evidence) !== JSON.stringify(context.evidence)) {
               i.status = 'CANCELLED'; i.error = check !== 'ALLOW' ? check : 'STATE_OR_FEE_CHANGED';
               event(s, 'INTENT_CANCELLED', `${i.id}: ${i.error}`); return false;
             }

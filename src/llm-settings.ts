@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Planner } from './domain.ts';
 import { Engine } from './engine.ts';
 import { Store } from './store.ts';
-import { RulesPlanner } from './planner.ts';
+import { RulesPlanner, DisabledPlanner } from './planner.ts';
 import { ModelPlanner } from './adapters/model.ts';
 import { JevReviewedPlanner } from './adapters/jev.ts';
 import { AgentWorkspace } from './agent-workspace.ts';
@@ -48,7 +48,7 @@ export class LlmSettingsService {
       enabled, active: enabled && this.engine.planner.name.startsWith('AI ·'),
       llmKeyConfigured: Secret.safeParse(this.env.OPENAI_API_KEY).success,
       llmEndpoint: this.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1/responses',
-      llmModel: this.env.OPENAI_MODEL ?? 'gpt-5.4',
+      llmModel: this.env.OPENAI_MODEL ?? 'gpt-5.4-mini',
       jevEnabled, jevKeyConfigured: Secret.safeParse(this.env.JEV_API_KEY).success,
       jevEndpoint: this.env.JEV_BASE_URL ?? 'https://api.typesafe.ai/v1/systemone',
       jevModel: this.env.JEV_MODEL ?? 'jev-latest',
@@ -65,7 +65,7 @@ export class LlmSettingsService {
     if (input.enabled && !llmIsLoopback && !Secret.safeParse(llmKey).success) throw new Error('LLM_KEY_REQUIRED');
     if (input.jevEnabled && !Secret.safeParse(jevKey).success) throw new Error('JEV_KEY_REQUIRED');
 
-    let planner: Planner = new RulesPlanner();
+    let planner: Planner = this.store.read().mode === 'testnet' ? new DisabledPlanner() : new RulesPlanner();
     if (input.enabled) {
       const base = new ModelPlanner(llmKey, input.llmModel, this.transport, new AgentWorkspace(this.store), input.llmEndpoint);
       planner = input.jevEnabled
@@ -84,6 +84,10 @@ export class LlmSettingsService {
     try { updateLocalEnv(this.envFile, values); }
     catch (error) { this.engine.setPlanner(previousPlanner); throw error; }
     Object.assign(this.env, values);
+    this.store.change(s => {
+      const control=s.modelControl??={requests:[],blocks:{}};
+      control.configurationVersion=(control.configurationVersion??0)+1;
+    });
     return this.settings();
   }
 }

@@ -69,7 +69,7 @@ Open **Authority & connections → LLM connection**.
 
 1. Enable the primary model.
 2. Enter the **endpoint**, **model** and **API key** supplied by your provider. The supported primary API is **OpenAI Responses-compatible**; a Chat Completions-only endpoint is not interchangeable.
-3. For the demonstrated OpenAI configuration, use `https://api.openai.com/v1/responses` and model `gpt-5.4`.
+3. For the demonstrated OpenAI configuration, use `https://api.openai.com/v1/responses` and model `gpt-5.4-mini`.
 4. Enable Jev if you want typed review of financial proposals. Its default endpoint is `https://api.typesafe.ai/v1/systemone`, model `jev-latest`, and minimum confidence `0.80`. Enter your own Jev API key.
 5. Save. The planner changes for the next evaluation without a server restart. Wait for any active evaluation to finish before changing providers.
 
@@ -78,6 +78,31 @@ Keys are write-only: the panel shows whether a key is configured and never retur
 When enabled, the providers receive obligation summaries and requested business evidence. Provider calls consume your configured allowance. Use data you permit those providers to process. Wallet private keys and Circle session credentials never enter model context.
 
 The model reads operating instructions, current policy, skill descriptions and bounded memory, then calls tools to inspect evidence, balances and feasible plans. Jev returns `ALLOW`, `REVIEW` or `BLOCK`; low-confidence or unsafe financial proposals can be held for new facts or owner input.
+
+### Model usage and recovery
+
+Fresh installations default to `gpt-5.4-mini`. Saved model identifiers and credentials are preserved when upgrading. The primary Responses request uses low reasoning effort and an 8,000-token output ceiling; this ceiling is a reservation, not a target. The Agent reads missing context in batches and stops on repeated tool calls or an incomplete model response. An incomplete response cannot authorize a financial action.
+
+Primary planning and Jev review share request and token limits. Defaults are:
+
+| Local `.env` setting | Default | Meaning |
+| --- | ---: | --- |
+| `LLM_MAX_RUN_REQUESTS` | 40 | Maximum provider requests per evaluation, including retries |
+| `LLM_MAX_DAY_REQUESTS` | 120 | Maximum requests per UTC day |
+| `LLM_MAX_RUN_TOKENS` | 250000 | Combined input and output token allowance per evaluation |
+| `LLM_MAX_DAY_TOKENS` | 500000 | Combined allowance per UTC day |
+| `LLM_MAX_RUN_COST_NANO_USD` | 500000000 | Estimated known-price allowance of $0.50 per evaluation |
+| `LLM_MAX_DAY_COST_NANO_USD` | 1000000000 | Estimated known-price allowance of $1.00 per UTC day |
+
+Restart your installation after changing these limits. They control model usage separately from the wallet's USDC spending authority. Standard text cost estimates are not provider invoices or guaranteed billing caps. A provider/model with unknown pricing, including Jev, still consumes request and token allowances; its dollar estimate is unavailable. Configure billing limits with your provider as well.
+
+Each request reserves capacity before contacting the provider. An unchanged, supported OpenAI plaintext conversation prefix can reuse observed token usage with a margin; unsupported or changed inputs use a conservative byte-based estimate. Successful responses update the ledger with reported usage. Timeouts or missing usage retain their reservations instead of being counted as free. SQLite preserves the ledger across restarts and archives older finalized entries without deleting history.
+
+Authentication, exhausted credit and configuration failures block further calls to that provider. Temporary failures have a cooldown and at most one immediate retry. The scheduler also limits evaluations of unchanged business conditions, preventing a background polling loop from repeatedly spending the same allowance. A model disabled in testnet blocks new payout and CCTP submissions; simulation retains its labelled rules baseline.
+
+For local diagnostics, authenticated `GET /api/model-usage` returns current reservations, usage, estimates, limits and provider blocks. `GET /api/model-usage/archive?after=0&limit=100` returns archived entries with a `nextCursor` for pagination (maximum 200 entries per page). These endpoints require the localhost session token; the panel's browser developer tools can inspect them with the same session authorization used for `/api/state`.
+
+After fixing a blocked provider's credentials or billing, an authenticated `POST /api/model-usage/reset-blocks` with JSON `{"confirmed":true}` clears provider blocks. Wait for the current evaluation to finish first. Reset preserves usage and the current pause state: it does not bypass a budget or resume a paused Agent. Saving model settings records a configuration change without clearing usage. Re-enable automatic operation only when you intend to permit evaluations.
 
 ## 3. Connect your own Circle Agent Wallet
 
@@ -336,7 +361,7 @@ For an independent **simulation** rehearsal, use a new database filename. Do not
 | Port already occupied | Choose a free launcher port; do not stop another application |
 | SQLite experimental warning | Expected on the supported Node version; it is distinct from a startup failure |
 | Rules baseline appears | Enable and save the primary model connection; verify endpoint type and key |
-| Model request fails | Check the provider connection, model access and allowance; the run stops without assuming a payment |
+| Model request fails | Check the connection, model access, usage ledger and provider allowance. Fix a sticky provider failure before explicitly resetting blocks; incomplete responses stop without sending money |
 | Jev holds a proposal | Inspect current review status; new facts or a scoped owner response may be needed |
 | No imported obligations | Check the absolute export folder, schema, party mappings, revisions and source worker status |
 | Source records quarantined | Correct the invalid upstream records; preserve their IDs and increment revisions |

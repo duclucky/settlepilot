@@ -16,7 +16,7 @@ export interface ReceiptAllocation { transferId: string; sourceRecordKey: string
 export interface ChainCheckpoint { chain: Network; nextBlock: string; block?: string; blockHash?: string; openingBalance: string }
 export interface AgentJob {
   id: string; key: string; cause: string; dueAt: number; status: 'READY' | 'LEASED' | 'DONE' | 'NEEDS_ATTENTION';
-  attempts: number; leaseOwner?: string; leaseUntil?: number; fence?: number; runId?: string; error?: string; coalescedInto?:string;
+  attempts: number; leaseOwner?: string; leaseUntil?: number; fence?: number; runId?: string; error?: string; coalescedInto?:string; evaluationKey?: string;
 }
 export interface WorkerHealth { name: string; status: 'HEALTHY' | 'DEGRADED' | 'NOT_CONNECTED'; lastAttempt: number; lastSuccess?: number; error?: string; failures: number; retryAt?: number }
 export interface ActionRequest {
@@ -32,6 +32,7 @@ export interface AgentWait {
   contextKey: string; attempt: number; createdAt: number; dueAt: number;
 }
 export interface AutonomyState {
+  evaluationFailure?: { key: string; attempts: number; code: string; retryAt?: number; jobId: string };
   enabled: boolean;
   schemaVersion: 1; records: SourceRecord[]; parties: Party[]; transfers: ObservedTransfer[]; allocations: ReceiptAllocation[];
   checkpoints: ChainCheckpoint[]; jobs: AgentJob[]; requests: ActionRequest[]; responses: OwnerResponse[];

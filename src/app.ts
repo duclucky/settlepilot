@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { Address, CHAIN_ID, isPending, money, SOURCE_CHAIN_NAMES } from './domain.ts';
 import { event } from './store.ts';
-import { ModelRequests, modelLimits } from './model-requests.ts';
+import { ModelRequests } from './model-requests.ts';
 import { evaluate, planningEligibility } from './policy.ts';
 import type { Runtime } from './config.ts';
 import { processVerifiedCrosschainRevenue } from './crosschain-revenue.ts';
@@ -19,11 +19,15 @@ import type { AgentScheduler } from './scheduler.ts';
 import type { TelegramNotificationService } from './telegram-settings.ts';
 import type { LlmSettingsService } from './llm-settings.ts';
 import { assertSetupIdle, type WalletSettingsService } from './wallet-settings.ts';
+import {OwnerControls} from './owner-controls.ts';
+import {operationalReadiness} from './operational-readiness.ts';
+import {modelUsageSummary} from './model-usage-summary.ts';
 
 const ReceiptInput = z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/), source: Address, amount: z.string().transform(money), invoice: z.string().trim().min(1).max(120) }).strict();
 const CrosschainInput = ReceiptInput.extend({ sourceChain: z.enum(SOURCE_CHAIN_NAMES) });
-export function createApp(runtime: Runtime, token = randomBytes(32).toString('hex'), services: { telegram?: TelegramNotificationService; llm?: LlmSettingsService; wallet?:WalletSettingsService; stop?:()=>void; canStop?:()=>boolean; scheduler?:AgentScheduler } = {}) {
+export function createApp(runtime: Runtime, token = randomBytes(32).toString('hex'), services: { telegram?: TelegramNotificationService; llm?: LlmSettingsService; wallet?:WalletSettingsService; owner?:OwnerControls; stop?:()=>void; canStop?:()=>boolean; scheduler?:AgentScheduler } = {}) {
   const { store, engine } = runtime;
+  const owner=services.owner??new OwnerControls(store,{envFile:process.env.TAMEION_ENV_FILE??'.env'});
   const evaluateChanges = async () => services.scheduler ? { jobId:services.scheduler.wake('OWNER_OR_SOURCE_CHANGED') } : runAdaptive(runtime);
   const app = express(); app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -49,7 +53,7 @@ export function createApp(runtime: Runtime, token = randomBytes(32).toString('he
   app.get('/api/state', (_req, res) => {
     syncActionRequests(store);
     const state = store.read();
-    res.json({ ...state, runs:state.runs.map(summarizeDecisionRun), liquidityAnalysis:analyzeLiquidity(state), planner: engine.planner.name, sendEnabled: runtime.sendEnabled, bridgeEnabled: runtime.bridgeEnabled, walletProvider: runtime.walletProvider, eligibility: Object.fromEntries(state.obligations.map(o => [o.id, planningEligibility(state, o)])) });
+    res.json({ ...state, readiness:operationalReadiness(state,{sendEnabled:runtime.sendEnabled,bridgeEnabled:runtime.bridgeEnabled,modelEnabled:engine.planner.financialEnabled!==false,reviewerEnabled:engine.planner.name.includes(" + Jev ")}), runs:state.runs.map(summarizeDecisionRun), liquidityAnalysis:analyzeLiquidity(state), planner: engine.planner.name, sendEnabled: runtime.sendEnabled, bridgeEnabled: runtime.bridgeEnabled, walletProvider: runtime.walletProvider, eligibility: Object.fromEntries(state.obligations.map(o => [o.id, planningEligibility(state, o)])) });
   });
   app.get('/api/source-settings', (_req,res)=>{const a=store.read().autonomy!;res.json({enabled:a.enabled,sourceDirectory:a.sourceDirectory??'',sourceAuthority:a.sourceAuthority});});
   app.get('/api/runs/:id/decision-record', (req,res)=>{
@@ -81,7 +85,13 @@ export function createApp(runtime: Runtime, token = randomBytes(32).toString('he
     if (!services.llm) throw new Error('LLM_SETTINGS_UNAVAILABLE');
     res.json(services.llm.settings());
   });
-  app.get('/api/model-usage',(_req,res)=>res.json({limits:modelLimits(),...new ModelRequests(store).snapshot(),costLabel:'Estimated standard text pricing, not provider billing. Unknown outcomes retain reservations; unknown provider prices are not treated as free.'}));
+  app.get('/api/model-usage',(_req,res)=>{const meter=new ModelRequests(store),control=meter.snapshot(),limits=meter.limits;res.json({limits,...control,summary:modelUsageSummary(control,limits),costLabel:'Estimated standard text pricing, not provider billing. Unknown outcomes retain reservations; unknown provider prices are not treated as free.'});});
+  app.get('/api/model-usage/summary',(_req,res)=>{const meter=new ModelRequests(store),control=meter.snapshot();res.json({limits:meter.limits,summary:modelUsageSummary(control,meter.limits),blocks:control.blocks,archivedRequests:control.archivedRequests??0});});
+  app.post('/api/model-usage/limits',(req,res)=>res.json({limits:owner.configureLimits(req.body)}));
+  app.get('/api/authority-settings',(_req,res)=>{const s=store.read();res.json({policy:s.policy,bridge:s.bridgePolicy,financialVersion:s.financialVersion,mode:s.mode,paused:s.paused,execution:owner.executionSettings(),activeExecution:{sendEnabled:runtime.sendEnabled,bridgeEnabled:runtime.bridgeEnabled}});});
+  app.post('/api/authority-settings',async(req,res)=>res.json(await owner.grant(req.body,()=>engine.gateway.snapshot())));
+  app.post('/api/authority-settings/revoke',(req,res)=>res.json(owner.revoke(req.body)));
+  app.post('/api/authority-settings/execution',(req,res)=>res.json(owner.configureExecution(req.body)));
   app.get('/api/wallet-settings',(_req,res)=>{if(!services.wallet)throw new Error('WALLET_SETTINGS_UNAVAILABLE');res.json(services.wallet.settings());});
   const walletSetup=()=>{if(!services.wallet)throw new Error('WALLET_SETTINGS_UNAVAILABLE');return services.wallet;};
   app.post('/api/wallet-settings/inspect',async(_req,res)=>res.json(await walletSetup().inspect()));

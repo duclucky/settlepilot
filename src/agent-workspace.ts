@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { readFileSync, readdirSync,realpathSync,statSync } from 'node:fs';
+import { resolve, join,relative,isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { actionBinding } from './action-binding.ts';
 import { enqueue } from './scheduler-core.ts';
@@ -40,6 +40,24 @@ export class AgentWorkspace {
   readonly root: string;
   constructor(private readonly store?: Store, root = resolve('agent')) { this.root = root; this.modelRequests=new ModelRequests(store); }
   get memoryEnabled() { return !!this.store; }
+  private readContextFile(path:string,limit:number){
+    const root=realpathSync(this.root),file=realpathSync(path),rel=relative(root,file);
+    if(rel.startsWith('..')||isAbsolute(rel))throw new Error('CONTEXT_PATH_ESCAPE');
+    if(!statSync(file).isFile()||statSync(file).size>limit*4)throw new Error('CONTEXT_FILE_TOO_LARGE');
+    const text=readFileSync(file,'utf8').replace(/^\uFEFF/,'').trim();
+    if(!text||text.length>limit)throw new Error('CONTEXT_FILE_TOO_LARGE');return text;
+  }
+  capturePromptContext(runId?:string){
+    const context=this.promptContext();
+    const contents=new Map(context.skills.map(skill=>[skill.name,this.readSkill(skill.name)]));
+    if([...contents.values()].reduce((n,value)=>n+value.length,0)>64000)throw new Error('SKILL_CATALOG_TOO_LARGE');
+    const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
+    const files=[{name:'AGENTS.md',sha256:hash(context.projectInstructions),characters:context.projectInstructions.length},{name:'POLICY.md',sha256:hash(context.policyConstitution),characters:context.policyConstitution.length},...context.skills.map(skill=>({name:`skills/${skill.name}/SKILL.md`,sha256:hash(contents.get(skill.name)!),characters:contents.get(skill.name)!.length}))];
+    const memorySha256=hash(JSON.stringify(context.memory));
+    const manifest={sha256:hash(JSON.stringify({files,memorySha256})),files,memorySha256};
+    if(this.store&&runId)this.store.change(s=>{const run=s.runs.find(r=>r.id===runId);if(run)run.contextManifest=manifest;});
+    return {...context,manifest,readSkill:(name:string)=>{const value=contents.get(SkillName.parse(name));if(value===undefined)throw new Error('UNKNOWN_SKILL');return value;}};
+  }
   planningContext(state?: State) {
     if(!this.store)return {plans:[],reviews:[]};
     return this.store.change(s=>{
@@ -86,12 +104,12 @@ export class AgentWorkspace {
     });
   }
   instructions() {
-    const text = readFileSync(join(this.root, 'AGENTS.md'), 'utf8').trim();
+    const text = this.readContextFile(join(this.root, 'AGENTS.md'),12000);
     if (!text || text.length > 12_000) throw new Error('INVALID_AGENT_INSTRUCTIONS');
     return text;
   }
   policyConstitution() {
-    const text = readFileSync(join(this.root, 'POLICY.md'), 'utf8').trim();
+    const text = this.readContextFile(join(this.root, 'POLICY.md'),12000);
     if (!text || text.length > 12_000) throw new Error('INVALID_POLICY_CONSTITUTION');
     return text;
   }
@@ -99,7 +117,7 @@ export class AgentWorkspace {
     return readdirSync(join(this.root, 'skills'), { withFileTypes: true })
       .filter(entry => entry.isDirectory() && SkillName.safeParse(entry.name).success)
       .map(entry => {
-        const parsed = frontmatter(readFileSync(join(this.root, 'skills', entry.name, 'SKILL.md'), 'utf8'));
+        const parsed = frontmatter(this.readContextFile(join(this.root, 'skills', entry.name, 'SKILL.md'),16000));
         if (parsed.fields.name !== entry.name || !parsed.fields.description) throw new Error('INVALID_SKILL_METADATA');
         return { name: entry.name, description: parsed.fields.description };
       }).sort((a, b) => a.name.localeCompare(b.name));
@@ -107,7 +125,7 @@ export class AgentWorkspace {
   readSkill(name: string) {
     const valid = SkillName.parse(name);
     if (!this.skills().some(skill => skill.name === valid)) throw new Error('UNKNOWN_SKILL');
-    const text = readFileSync(join(this.root, 'skills', valid, 'SKILL.md'), 'utf8');
+    const text = this.readContextFile(join(this.root, 'skills', valid, 'SKILL.md'),16000);
     if (text.length > 16_000) throw new Error('SKILL_TOO_LARGE');
     return text;
   }
@@ -122,7 +140,10 @@ export class AgentWorkspace {
     if ('content' in input && secretLike.test(input.content)) throw new Error('SECRET_LIKE_MEMORY_REJECTED');
     return this.store.change(state => {
       const now = new Date().toISOString();
-      if (input.action === 'add') state.agentMemory.push({ id: randomUUID(), kind: input.kind, content: input.content, createdAt: now, updatedAt: now });
+      if (input.action === 'add') {
+        if(state.agentMemory.some(entry=>entry.kind===input.kind&&entry.content===input.content))return structuredClone(state.agentMemory);
+        state.agentMemory.push({ id: randomUUID(), kind: input.kind, content: input.content, createdAt: now, updatedAt: now });
+      }
       else {
         const index = state.agentMemory.findIndex(entry => entry.id === input.entryId);
         if (index < 0) throw new Error('MEMORY_ENTRY_NOT_FOUND');

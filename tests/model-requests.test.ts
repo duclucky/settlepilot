@@ -24,10 +24,11 @@ test('reservations serialize concurrent calls and unknown outcome remains charge
 test('usage separates cached and reasoning tokens without double counting cost',async()=>{
  const store=new Store(':memory:',fixture());try{await call(new ModelRequests(store),async()=>ok());const r=store.read().modelControl!.requests[0];assert.equal(r.usage?.reasoningTokens,150);assert.equal(r.usage?.outputTokens,200);assert.equal(r.estimatedCostNanoUsd,1_110_000);assert.equal(r.status,'COMPLETE');}finally{store.close();}
 });
-test('one transient retry preserves the exact request and shares run limits',async()=>{
+test('transient retry is deferred, durable, and blocked until its cooldown expires',async()=>{
  const store=new Store(':memory:',fixture());let calls=0;const bodies:string[]=[];
  const send=(async(_url,init)=>{bodies.push(String(init?.body));return ++calls===1?new Response('{}',{status:503}):ok();})as typeof fetch;
- try{const c=new ModelRequests(store,defaultModelLimits,()=>Date.now(),async()=>{});await call(c,send);assert.equal(calls,2);assert.equal(bodies[0],bodies[1]);assert.equal(store.read().modelControl!.requests.length,2);}finally{store.close();}
+ let now=1000;
+ try{const c=new ModelRequests(store,defaultModelLimits,()=>now);await assert.rejects(call(c,send),/MODEL_TEMPORARILY_UNAVAILABLE/);await assert.rejects(call(new ModelRequests(store,defaultModelLimits,()=>now),send),/MODEL_TEMPORARILY_UNAVAILABLE/);assert.equal(calls,1);now+=300001;await call(c,send);assert.equal(calls,2);assert.equal(bodies[0],bodies[1]);assert.equal(store.read().modelControl!.requests.length,2);}finally{store.close();}
 });
 test('unknown prices remain unknown and still obey token and call caps',async()=>{
  const store=new Store(':memory:',fixture());try{const c=new ModelRequests(store,{...defaultModelLimits,maxRunRequests:1});await c.request('reviewer','jev-latest','https://example.test',request,async()=>ok(),'r');assert.equal(store.read().modelControl!.requests[0].estimatedCostNanoUsd,undefined);await assert.rejects(call(c,async()=>ok()),/MODEL_RUN_LIMIT/);}finally{store.close();}

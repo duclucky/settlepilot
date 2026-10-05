@@ -50,7 +50,7 @@ test('historical completed usage rolls over without erasing reused run limits',a
 
 test('successful evaluations do not consume retry allowance of a later failure',async()=>{
  let broken=false,calls=0;const {store,runtime}=setup(()=>({name:'AI stub',plan:async()=>{calls++;if(broken)throw new Error('MODEL_TIMEOUT');return [];}}));
- try{const scheduler=new AgentScheduler(runtime);for(let i=0;i<3;i++){scheduler.wake('AGENT_RECHECK',`success:${i}`);await scheduler.tick();}broken=true;scheduler.wake('AGENT_RECHECK','failure');await scheduler.tick();assert.equal(calls,4);assert.equal(store.read().autonomy!.jobs.at(-1)?.status,'READY');assert.equal(store.read().autonomy!.jobs.at(-1)?.attempts,1);}finally{store.close();}
+ try{const scheduler=new AgentScheduler(runtime);for(let i=0;i<3;i++){store.change(s=>s.snapshot.balance=money(String(16+i)));scheduler.wake('AGENT_RECHECK',`success:${i}`);await scheduler.tick();}broken=true;store.change(s=>s.snapshot.balance=money('20'));scheduler.wake('AGENT_RECHECK','failure');await scheduler.tick();assert.equal(calls,4);assert.equal(store.read().autonomy!.jobs.at(-1)?.status,'READY');assert.equal(store.read().autonomy!.jobs.at(-1)?.attempts,1);}finally{store.close();}
 });
 
 test('disabling model invalidates a prepared payout without blocking existing reconciliation',async()=>{
@@ -94,9 +94,9 @@ test('terminal evaluation failure survives SQLite reopen until explicit reset',a
 });
 
 test('re-enabling configured model permits evaluation after disabled-model failure',async()=>{
- const dir=mkdtempSync(join(tmpdir(),'model-reenable-')),s=fixture();s.mode='testnet';s.obligations=[];s.evidence=[];const store=new Store(':memory:',s);let calls=0;
+ const dir=mkdtempSync(join(tmpdir(),'model-reenable-')),s=fixture();s.mode='testnet';s.obligations=s.obligations.slice(0,1);s.evidence=[];const store=new Store(':memory:',s);let calls=0;
  const gateway:PaymentGateway={mode:'testnet',snapshot:async()=>({...s.snapshot,observedAt:new Date().toISOString()}),estimate:async()=> '0',submit:async()=>{throw new Error('MUST_NOT_SEND');},reconcile:async()=>({status:'pending'})};
  const engine=new Engine(store,gateway,new DisabledPlanner(),false),scheduler=new AgentScheduler({store,engine,arc:undefined,sources:undefined,bridge:undefined,bridgeEnabled:false,sendEnabled:false,useModel:true,walletProvider:'simulation'});
- const service=new LlmSettingsService(store,engine,{env:{},envFile:join(dir,'.env'),transport:async()=>{calls++;return new Response(JSON.stringify({output:[{type:'function_call',name:'finish',call_id:'finish',arguments:'{"decisions":[]}'}],usage:{input_tokens:100,output_tokens:10}}));}});
+ const service=new LlmSettingsService(store,engine,{env:{},envFile:join(dir,'.env'),transport:async()=>{calls++;return new Response(JSON.stringify({output:[{type:'function_call',name:'finish',call_id:'finish',arguments:JSON.stringify({decisions:[{obligationId:'A',action:'HOLD',reason:'Fixture',evidenceIds:[]}]})}],usage:{input_tokens:100,output_tokens:10}}));}});
  try{scheduler.wake('SOURCE_UPDATED','first');await scheduler.tick();assert.equal(store.read().runs.at(-1)?.failureCode,'MODEL_DISABLED');service.configure({enabled:true,llmApiKey:'synthetic-key-only',llmEndpoint:'https://example.invalid',llmModel:'gpt-5.4-mini',jevEnabled:false,jevEndpoint:'https://example.invalid',jevModel:'jev-latest',jevMinimumConfidence:0.8});scheduler.wake('MODEL_CONFIGURATION_CHANGED','enabled');await scheduler.tick();assert.equal(calls,1);assert.equal(store.read().runs.at(-1)?.status,'DONE');}finally{store.close();rmSync(dir,{recursive:true,force:true});}
 });

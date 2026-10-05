@@ -25,3 +25,11 @@ Setup contains write-only model endpoint/model/API key fields, optional Jev and 
 Verification uses offline adapters and an isolated browser fixture with an in-memory database and no Agent workers. No real Circle login, Terms acceptance, provider call, alert or financial transaction was performed. See [scope and verification](35-local-workspace-and-setup.md); actual Circle login remains dependent on the owner's account and OTP.
 
 The local workspace/Setup increment passes 260 offline tests and the production build. Desktop/mobile fixture inspection and the 222-file public-source scan pass. The isolated preview was closed after verification.
+
+## Owner controls, Hermes patterns and LLM loop repair — 2026-10-05
+
+Setup supports reviewed, version-bound spending grants/revocation, saved sending switches, usage/budget limits and connection recovery. SQLite authority and consumed usage survive restart. Overview shows prerequisites and stalled evaluations. See [owner controls](36-owner-controls-and-readiness.md).
+
+Selected Hermes patterns are implemented in TypeScript: frozen per-evaluation instructions/policy/skills/memory, hash manifests, lazy repeat skill reads and duplicate memory suppression. The separate reference checkout is pinned in [selection record](37-hermes-backend-selection.md). Memory never grants spending authority.
+
+The [LLM loop repair](38-llm-loop-control.md) suppresses unchanged rechecks, canonicalizes repeated tools, stops stalled/error loops, defers temporary provider retries and replaces recursive CCTP replanning with durable jobs. New financial facts, owner delays/approval expiry and deadline transitions remain eligible. Verification: 282 offline tests and build; desktop/mobile fixture checks; no live provider call or transfer. Publication is verified separately after upload.

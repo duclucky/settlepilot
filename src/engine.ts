@@ -8,6 +8,7 @@ import { AgentEscalationError, AgentUserDecisionRequired } from './agent-escalat
 import { recordPlanDecisions, refreshGoalPlans } from './goal-plans.ts';
 import { createDecisionRecord } from './decision-record.ts';
 import { modelFailureCodes } from './model-requests.ts';
+import { evaluationKey } from './evaluation-control.ts';
 
 export class Engine {
   executionGuard?: () => boolean;
@@ -35,11 +36,12 @@ export class Engine {
     const snapshot = await this.gateway.snapshot();
     this.store.change(s => { s.snapshot = snapshot; });
     const context = this.store.read();
+    const planningAt=this.clock();
     this.store.change(s => {
       const run = s.runs.find(r => r.id === id)!;
       run.snapshot = structuredClone(context.snapshot); run.policyVersion = context.policy.version; run.financialVersion = context.financialVersion;
+      run.evaluationKey=evaluationKey(context,planningAt);
     });
-    const planningAt=this.clock();
     const decisions = validateDecisions(await this.planner.plan(structuredClone(context), id), context);
     // Persist the captured financial context with the final reviewed choices before any executor runs.
     const decisionRecord=createDecisionRecord(context,id,this.planner.name,decisions,planningAt);

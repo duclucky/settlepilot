@@ -5,6 +5,7 @@ import { enqueue } from './scheduler-core.ts';
 
 export async function runAdaptive(runtime: Runtime, receivableId?: string, depth = 0, refreshInventory = true): Promise<{ runId: string; bridgeId?: string }> {
   const { store, engine, sources, bridge } = runtime;
+  const stopStale=(runId:string)=>{store.change(state=>{const run=state.runs.find(r=>r.id===runId)!;run.status='ERROR';run.executionStatus='INVALIDATED';run.failureCode='MODEL_NO_PROGRESS';run.error='RUN_FAILED_CHECK_CONFIGURATION_OR_INPUT';event(state,'RUN_FAILURE_CODE',`${runId}: MODEL_NO_PROGRESS`);});return {runId};};
   if (store.read().mode !== 'testnet') return { runId: await engine.run() };
   if (!sources || !bridge || !runtime.bridgeEnabled) {
     if (sources) await refreshCrosschainBalances(store, sources, false);
@@ -22,21 +23,19 @@ export async function runAdaptive(runtime: Runtime, receivableId?: string, depth
   const observed = store.read();
   if (run.financialVersion !== observed.financialVersion || run.policyVersion !== observed.policy.version) {
     store.change(state => { state.runs.find(item => item.id === runId)!.executionStatus = 'INVALIDATED'; });
-    if (depth >= 8) throw new Error('FUNDING_PLAN_STALE');
+    if (depth >= 1) return stopStale(runId);
     return runAdaptive(runtime, undefined, depth + 1, false);
   }
   const bridgeId = receivableId ? await bridge.fund(receivableId, runId) : await bridge.fundFromInventory(runId);
   if (!bridgeId) {
     const current = store.read();
-    if (run.financialVersion !== current.financialVersion && depth < 8) return runAdaptive(runtime, undefined, depth + 1, false);
+    if (run.financialVersion !== current.financialVersion) return depth>=1?stopStale(runId):runAdaptive(runtime, undefined, depth + 1, false);
     await engine.executePlanned(runId);
     return { runId };
   }
   if (store.read().bridgeIntents.find(item => item.id === bridgeId)?.status !== 'SETTLED') return { runId, bridgeId };
-  if (depth >= 8) {
-    store.change(state => { event(state, 'ADAPTIVE_FUNDING_LIMIT_REACHED', runId);enqueue(state,'BRIDGE_SETTLED_CONTINUATION',`bridge-continuation:${bridgeId}`); });
-    return { runId, bridgeId };
-  }
-  const next = await runAdaptive(runtime, undefined, depth + 1);
-  return { ...next, bridgeId: next.bridgeId ?? bridgeId };
+  // A verified settlement creates one durable continuation, not another nested
+  // model loop with a new run budget. The scheduler coalesces fresh observations.
+  store.change(state => {event(state,'ADAPTIVE_CONTINUATION_QUEUED',runId);enqueue(state,'BRIDGE_SETTLED_CONTINUATION',`bridge-continuation:${bridgeId}`);});
+  return {runId,bridgeId};
 }

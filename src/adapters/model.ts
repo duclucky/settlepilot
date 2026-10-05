@@ -56,12 +56,14 @@ export class ModelPlanner implements Planner {
   recordReview(observation:ReviewObservation){this.workspace.recordReview(observation);}
   reconsider(state:State,feedback:ReviewFeedback,runId?:string){return this.plan(state,runId,feedback);}
   async plan(state: State, runId?: string, reviewFeedback?:ReviewFeedback) {
+    const unmatchedReceipts=state.autonomy?.transfers.some(t=>t.status==='VERIFIED'&&t.classification==='UNMATCHED')&&state.autonomy?.records.some(r=>r.kind==='RECEIVABLE'&&r.active&&r.authoritative);
+    if(!state.obligations.some(o=>!o.paid&&!o.archived)&&!unmatchedReceipts)return [];
     runId??=randomUUID();
     // The plan evaluates its captured inputs. Executors refresh and revalidate
     // actual balances and authority before any financial side effect.
     const planningAt = reviewFeedback?.planningAt??Date.now();
     const planningDeadline = AbortSignal.timeout(300_000);
-    const agentContext = this.workspace.promptContext();
+    const agentContext = this.workspace.capturePromptContext(runId);
     // Per-obligation facts are in candidates and prepare_context. The full
     // analysis remains available on demand without duplicating that portfolio.
     const { obligations: _obligations, ...liquiditySummary } = analyzeLiquidity(state, planningAt);
@@ -101,10 +103,29 @@ export class ModelPlanner implements Planner {
       recentOperations: state.events.slice(-12).map(({ type, detail, at }) => ({ type, detail, at })),
     }) }];
     let calls = 0; const inspected = new Set<string>(); const policyChecked = new Set<string>(); const loadedSkills = new Set<string>();
+    const readRunSkill=(name:string)=>loadedSkills.has(name)?`Skill ${name} is already loaded in this evaluation. Follow the previously returned procedure. Context manifest: ${agentContext.manifest.sha256}.`:agentContext.readSkill(name);
     const policyRejections = new Map<string, string>();
     const heldByTool = new Set<string>();
     let treasuryInspected = false; let selectedFundingSource: typeof SOURCE_CHAIN_NAMES[number] | undefined;
     const repeatedCalls=new Map<string,number>();
+    const completedToolKinds=new Set<string>();
+    let noProgress=0;
+    const contextProgress=()=>JSON.stringify([[...inspected].sort(),[...policyChecked].sort(),[...loadedSkills].sort(),treasuryInspected,selectedFundingSource,[...heldByTool].sort(),[...completedToolKinds].sort()]);
+    const canonical=(value:unknown):unknown=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>[k,canonical(v)])):value;
+    const progressCheck=(status:'SUCCESS'|'ERROR',name:string,before:string,signature?:string)=>{
+      // New notes and rewritten plan descriptions do not replenish progress.
+      // A distinct portfolio preview can be useful when correcting priorities.
+      if(status==='SUCCESS'&&['memory','analyze_liquidity'].includes(name))completedToolKinds.add(name);
+      if(status==='SUCCESS'&&signature){
+        const args=JSON.parse(signature)[1];
+        if(name==='record_plan'||name==='record_plans')for(const plan of name==='record_plan'?[args]:args.plans)completedToolKinds.add(JSON.stringify(['plan',plan.obligationId,plan.steps.map((s:{action:string;sourceChain:string|null})=>[s.action,s.sourceChain])]));
+        if(name==='defer_obligation')completedToolKinds.add(`defer:${args.obligationId}:${args.responseId}`);
+        if(name==='propose_receipt_match')completedToolKinds.add(`receipt:${args.transferId}`);
+      }
+      if(status==='SUCCESS'&&name==='preview_plan'&&signature)completedToolKinds.add(signature);
+      noProgress=status==='ERROR'||before===contextProgress()?noProgress+1:0;
+      if(noProgress>=2){if(policyRejections.size)stop('MODEL_NO_PROGRESS');throw new ModelRequestError('MODEL_NO_PROGRESS');}
+    };
     const missingContext=(call:z.infer<typeof ToolCall>,code:string)=>{
       // These errors follow schema validation. Inspect the proposed action only
       // to explain read prerequisites, never to choose or replace that action.
@@ -149,9 +170,11 @@ export class ModelPlanner implements Planner {
       const functionCalls = body.output.map(item => ToolCall.safeParse(item)).filter(result => result.success).map(result => result.data!);
       if (functionCalls.length !== 1 || ++calls > 20) stop('INVALID_TOOL_SEQUENCE');
       const call = functionCalls[0]; let result: unknown; let detail = ''; let status: 'SUCCESS' | 'ERROR' = 'SUCCESS';
-      const signature=JSON.stringify([call.name,call.arguments]);
+      let normalized:unknown;try{normalized=canonical(JSON.parse(call.arguments));}catch{normalized='INVALID_JSON';}
+      const signature=JSON.stringify([call.name,normalized]);
       repeatedCalls.set(signature,(repeatedCalls.get(signature)??0)+1);
-      if(repeatedCalls.get(signature)!>3){if(policyRejections.size)stop('MODEL_REPEATED_TOOL_CALL');throw new ModelRequestError('MODEL_REPEATED_TOOL_CALL');}
+      if(repeatedCalls.get(signature)!>2){if(policyRejections.size)stop('MODEL_REPEATED_TOOL_CALL');throw new ModelRequestError('MODEL_REPEATED_TOOL_CALL');}
+      const beforeProgress=contextProgress();
       try {
         const args: unknown = JSON.parse(call.arguments);
         if(call.name==='prepare_context'){
@@ -159,7 +182,7 @@ export class ModelPlanner implements Planner {
           if(new Set(v.obligationIds).size!==v.obligationIds.length)throw new Error('DUPLICATE_CANDIDATE');
           const obligations=v.obligationIds.map(id=>state.obligations.find(o=>o.id===id&&!o.paid&&!o.archived));
           if(obligations.some(o=>!o))throw new Error('UNKNOWN_CANDIDATE');
-          const skills=Object.fromEntries(v.skillNames.map(name=>[name,this.workspace.readSkill(name)]));
+          const skills=Object.fromEntries(v.skillNames.map(name=>[name,readRunSkill(name)]));
           v.skillNames.forEach(name=>loadedSkills.add(name));v.obligationIds.forEach(id=>{inspected.add(id);policyChecked.add(id);});treasuryInspected=true;
           result={skills,items:obligations.map(o=>({obligationId:o!.id,evidence:state.evidence.filter(e=>e.obligationId===o!.id),eligibility:planningEligibility(state,o!,planningAt)})),treasury:{arc:state.snapshot,sources:verifiedCrosschainBalances(state,planningAt),observedSources:observedCrosschainBalances(state,planningAt),bridgePolicy:state.bridgePolicy}};
           detail=`${v.obligationIds.length} obligations; ${v.skillNames.length} skills; read-only`;
@@ -224,7 +247,7 @@ export class ModelPlanner implements Planner {
           const v=z.object({transferId:z.string().max(180),sourceRecordKey:z.string().max(80),question:z.string().trim().min(1).max(500)}).strict().parse(args);result=this.workspace.proposeReceiptMatch(v.transferId,v.sourceRecordKey,v.question);detail='Receipt match proposed';
         }else if (call.name === 'read_skill') {
           const { name } = z.object({ name: z.string() }).strict().parse(args);
-          result = { name, content: this.workspace.readSkill(name) }; loadedSkills.add(name); detail = name;
+          result = { name, content: readRunSkill(name) }; loadedSkills.add(name); detail = name;
         } else if (call.name === 'inspect_treasury') {
           z.object({}).strict().parse(args); treasuryInspected = true;
           const sources = verifiedCrosschainBalances(state, planningAt);
@@ -299,7 +322,7 @@ export class ModelPlanner implements Planner {
             result={error:'PAYMENT_PORTFOLIO_INFEASIBLE',executionAuthorized:false,conflicts:budgetConflicts,
               instruction:'Payout and funding targets share one budget. Revise the selected obligations; future money does not increase spending authority.'};
             this.workspace.recordTool(runId,call.name,'ERROR','PAYMENT_PORTFOLIO_INFEASIBLE');
-            input.push({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)});continue;
+            input.push({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)});progressCheck('ERROR',call.name,beforeProgress);continue;
           }
           if(payouts.length>1){
             const preview=previewPlan(state,{steps:payouts.map(d=>({obligationId:d.obligationId,action:d.action,sourceChain:null}))},planningAt);
@@ -309,6 +332,7 @@ export class ModelPlanner implements Planner {
                 instruction:'Revise the ordered decisions using shared balance, gas, reserve and budget. Choose which obligations to HOLD; the backend will not choose for you.'};
               this.workspace.recordTool(runId,call.name,'ERROR','PAYMENT_PORTFOLIO_INFEASIBLE');
               input.push({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)});
+              progressCheck('ERROR',call.name,beforeProgress);
               continue;
             }
           }
@@ -332,6 +356,7 @@ export class ModelPlanner implements Planner {
           } else throw new Error('UNKNOWN_TOOL');
         }
       } catch (error) {
+        if(error instanceof ModelRequestError)throw error;
         if (error instanceof AgentUserDecisionRequired) throw error;
         result = toolError(error); status = 'ERROR'; detail = (result as { error: string }).error;
         if(['EVIDENCE_NOT_INSPECTED','SETTLEMENT_SKILL_NOT_LOADED','POLICY_NOT_INSPECTED','FUNDING_CONTEXT_NOT_INSPECTED','FUNDING_SOURCE_NOT_SELECTED','PREVIEW_CONTEXT_NOT_INSPECTED','CONTEXT_NOT_INSPECTED','TREASURY_NOT_INSPECTED'].includes(detail)){
@@ -340,6 +365,7 @@ export class ModelPlanner implements Planner {
       }
       this.workspace.recordTool(runId, call.name, status, detail || call.name);
       input.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result) });
+      progressCheck(status,call.name,beforeProgress,signature);
     }
     return stop('MODEL_TOOL_LIMIT');
   }

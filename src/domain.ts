@@ -63,6 +63,8 @@ export const DecisionSchema = z.object({
 }).strict();
 export type Decision = z.infer<typeof DecisionSchema>;
 export interface Run {
+  evaluationKey?:string;
+  contextManifest?:{sha256:string;files:{name:string;sha256:string;characters:number}[];memorySha256:string};
   failureCode?: string;
   decisionRecord?: DecisionRecord;
   decisionRecordSummary?: { sha256: string; capturedAt: string };

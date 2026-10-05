@@ -35,7 +35,7 @@ export class AutonomousOperations {
       })]:[]),
     ];
     if(arc)tasks.push(this.workers.run('chain:ARC-TESTNET',()=>observeChain(store,'ARC-TESTNET',rpcObserver('ARC-TESTNET',arc.client,store.read().policy.sender))));
-    if(sources)for(const [chain,reader]of sources)tasks.push(this.workers.run(`chain:${chain}`,()=>observeChain(store,chain,rpcObserver(chain,reader.client,store.read().policy.sender))));
+    if(sources)for(const [chain,reader]of sources)if(store.read().bridgePolicy.sourceChains.includes(chain))tasks.push(this.workers.run(`chain:${chain}`,()=>observeChain(store,chain,rpcObserver(chain,reader.client,store.read().policy.sender))));
     if(this.telegram?.settings().ready)tasks.push(this.workers.run('telegram',()=>this.telegram!.tick()));
     await Promise.allSettled(tasks);
     if(!store.read().autonomy!.sourceDirectory)store.change(s=>{const a=s.autonomy!;let w=a.workers.find(w=>w.name==='business-source');if(!w){w={name:'business-source',status:'NOT_CONNECTED',lastAttempt:Date.now(),failures:0};a.workers.push(w);}w.status='NOT_CONNECTED';});

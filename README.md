@@ -81,28 +81,17 @@ The model reads operating instructions, current policy, skill descriptions and b
 
 ### Model usage and recovery
 
-Fresh installations default to `gpt-5.4-mini`. Saved model identifiers and credentials are preserved when upgrading. The primary Responses request uses low reasoning effort and an 8,000-token output ceiling; this ceiling is a reservation, not a target. The Agent reads missing context in batches and stops on repeated tool calls or an incomplete model response. An incomplete response cannot authorize a financial action.
+Open **Setup → AI cost & budget** to see today's requests, reported tokens, outstanding reservations and known-price cost estimates. The day resets at 00:00 UTC, with the next reset displayed in your local time. Unknown provider prices are explicitly shown as unavailable; their requests still consume token and request allowances.
 
-Primary planning and Jev review share request and token limits. Defaults are:
+Open **Set model usage limits** to set request, token and estimated USD allowances for each evaluation and UTC day. Review the values, check the confirmation box and save. Changes apply to the next admitted request, survive restart, and retain consumed usage and reservations. Set provider billing limits as well: application cost estimates are not invoices or guaranteed billing caps.
 
-| Local `.env` setting | Default | Meaning |
-| --- | ---: | --- |
-| `LLM_MAX_RUN_REQUESTS` | 40 | Maximum provider requests per evaluation, including retries |
-| `LLM_MAX_DAY_REQUESTS` | 120 | Maximum requests per UTC day |
-| `LLM_MAX_RUN_TOKENS` | 250000 | Combined input and output token allowance per evaluation |
-| `LLM_MAX_DAY_TOKENS` | 500000 | Combined allowance per UTC day |
-| `LLM_MAX_RUN_COST_NANO_USD` | 500000000 | Estimated known-price allowance of $0.50 per evaluation |
-| `LLM_MAX_DAY_COST_NANO_USD` | 1000000000 | Estimated known-price allowance of $1.00 per UTC day |
+Defaults are 40 requests, 250,000 tokens and $0.50 in known-price allowance per evaluation; 120 requests, 500,000 tokens and $1.00 per UTC day. Historical `LLM_MAX_RUN_REQUESTS`, `LLM_MAX_DAY_REQUESTS`, `LLM_MAX_RUN_TOKENS`, `LLM_MAX_DAY_TOKENS`, `LLM_MAX_RUN_COST_NANO_USD` and `LLM_MAX_DAY_COST_NANO_USD` environment values initialize defaults. Owner limits saved in SQLite take precedence.
 
-Restart your installation after changing these limits. They control model usage separately from the wallet's USDC spending authority. Standard text cost estimates are not provider invoices or guaranteed billing caps. A provider/model with unknown pricing, including Jev, still consumes request and token allowances; its dollar estimate is unavailable. Configure billing limits with your provider as well.
+Every request reserves capacity before contacting the provider. Reported usage replaces the reservation; timeouts and missing usage retain it. Authentication, exhausted credit and configuration failures block repeated calls, while temporary failures have a cooldown. After fixing the provider issue, use **Recover a blocked model connection**, confirm and choose **Clear connection blocks**. Clearing blocks preserves usage, limits and the current pause state.
 
-Each request reserves capacity before contacting the provider. An unchanged, supported OpenAI plaintext conversation prefix can reuse observed token usage with a margin; unsupported or changed inputs use a conservative byte-based estimate. Successful responses update the ledger with reported usage. Timeouts or missing usage retain their reservations instead of being counted as free. SQLite preserves the ledger across restarts and archives older finalized entries without deleting history.
+Routine polling and scheduled rechecks do not call the model again after the same facts have been evaluated. New funds, evidence, owner responses, meaningful deadline transitions or a model configuration/reset can require another evaluation. Empty payment portfolios with no actionable unmatched receipts make no planner calls. Temporary provider errors wait at least five minutes before a bounded scheduler retry; restarting does not renew that retry allowance. Repeated tools, consecutive errors and notes that do not advance the decision stop the evaluation. Changing liquidity allows at most one immediate replan; verified CCTP settlement resumes through a saved scheduler job rather than recursive model calls.
 
-Authentication, exhausted credit and configuration failures block further calls to that provider. Temporary failures have a cooldown and at most one immediate retry. The scheduler also limits evaluations of unchanged business conditions, preventing a background polling loop from repeatedly spending the same allowance. A model disabled in testnet blocks new payout and CCTP submissions; simulation retains its labelled rules baseline.
-
-For local diagnostics, authenticated `GET /api/model-usage` returns current reservations, usage, estimates, limits and provider blocks. `GET /api/model-usage/archive?after=0&limit=100` returns archived entries with a `nextCursor` for pagination (maximum 200 entries per page). These endpoints require the localhost session token; the panel's browser developer tools can inspect them with the same session authorization used for `/api/state`.
-
-After fixing a blocked provider's credentials or billing, an authenticated `POST /api/model-usage/reset-blocks` with JSON `{"confirmed":true}` clears provider blocks. Wait for the current evaluation to finish first. Reset preserves usage and the current pause state: it does not bypass a budget or resume a paused Agent. Saving model settings records a configuration change without clearing usage. Re-enable automatic operation only when you intend to permit evaluations.
+The Agent freezes its instruction files, skill contents and bounded memory for each evaluation. Skills are sent only when needed, with short repeat-read results. Saved runs contain a hash manifest identifying their context; the full financial history remains in SQLite.
 
 ## 3. Connect your own Circle Agent Wallet
 
@@ -146,104 +135,23 @@ Test-Path -LiteralPath $circleEntry
 
 Replace email, request ID and OTP locally; never commit or screenshot session material. Set `CIRCLE_CLI_ENTRYPOINT` to the verified path, reopen the panel, and return to Setup. See [Circle's CLI documentation](https://developers.circle.com/agent-stack/circle-cli) for the provider contract.
 
-## 4. Configure testnet authority
+## 4. Grant spending permission in Setup
 
-Wallet connection setup and payment authority are separate. **Setup** can save the connection; this release does not provide a general financial-policy editor or migrate an existing authority automatically.
+After connecting your own Circle Agent Wallet and restarting, open **Setup → What may the Agent pay?**. Pause operations before changing the scope. Wait for any submitted payments or CCTP transfers to finish reconciliation.
 
-### Create local configuration without overwriting existing settings
+1. Add approved recipient addresses, one per line. If business records already contain counterparties, use **Add [name]** to select an existing address. Review each address yourself; importing records does not authorize recipients.
+2. Enter the USDC reserve to retain on Arc, maximum payment gas allowance, maximum principal per whole obligation and total payout budget. These fields use decimal USDC amounts, with up to six decimal places. The total budget includes payouts already completed in this workspace; renewing authority never resets spent USDC.
+3. Choose an expiry in your local time, within the next year. Expired authority prevents new financial execution.
+4. If needed, enable crosschain funding and choose the approved source testnets, maximum amount per bridge and maximum fee. Funds become available on Arc only after the mint receipt is verified.
+5. Choose **Review spending permission**. Review the exact wallet, recipients, amounts, routes and expiry, check the authorization box and choose **Grant permission**. The backend verifies the wallet and Arc Testnet chain ID **5042002** before saving. If wallet state or policy changed during review, refresh and review the latest scope.
+6. Open **Enable payment sending**, choose the payout/CCTP switches you authorize, check the confirmation box and save. Use **Your Agent Wallet → Stop panel to apply setup**, then reopen **Open-SettlePilot.vbs**. Sending switches take effect after restart. Permission and model budget edits apply without restart.
+7. Check **Overview** for remaining prerequisites. Connect business records and enable automatic evaluations when ready; resume operations if paused.
 
-If no `.env` exists, copy the example:
+**Revoke permission & pause** disables new work immediately. Submitted operations and their evidence remain available for reconciliation. To renew or change scope, edit the fields and review a new grant. One-time exception approvals never replace disabled or expired general authority.
 
-```powershell
-if (-not (Test-Path -LiteralPath '.env')) {
-  Copy-Item -LiteralPath '.env.example' -Destination '.env'
-}
-New-Item -ItemType Directory -Path 'data' -Force | Out-Null
-if (-not (Test-Path -LiteralPath 'data/policy.json')) {
-  Copy-Item -LiteralPath 'policy.example.json' -Destination 'data/policy.json'
-}
-```
+The initial `data/policy.json` seed stays disabled and expires in the past. After initialization, the versioned authority in SQLite is the source of truth. Editing the seed file cannot replace an existing scope. Sender/provider changes still require a reviewed migration preserving wallet identity and unresolved transaction history. Never delete a database to bypass that binding.
 
-If the panel already created `.env`, edit that file and retain its provider settings. Keep these files private and ignored by Git.
-
-Set these startup values, replacing the placeholders locally:
-
-```dotenv
-TAMEION_MODE=testnet
-WALLET_PROVIDER=agent
-CIRCLE_CLI_ENTRYPOINT=C:/actual/path/to/@circle-fin/cli/dist/index.js
-POLICY_FILE=data/policy.json
-DATABASE_PATH=data/testnet.db
-ARC_TESTNET_RPC_URL=YOUR_PRIVATE_ARC_TESTNET_RPC
-SEND_ENABLED=false
-BRIDGE_ENABLED=false
-```
-
-Use your unique Arc RPC issued by the Canteen CLI when participating in the contest. Keep the tokenized URL private. The application's historical `TAMEION_` variable names remain valid even though the product is called SettlePilot.
-
-Always use a separate testnet database. A database is bound to its wallet backend and sender; changing `.env` does not convert simulation history into testnet history.
-
-### Edit the policy
-
-Replace the sender and allowlist placeholders in `data/policy.json`. Set:
-
-| Field | Meaning |
-| --- | --- |
-| `chainId` | Must be `5042002` |
-| `sender` | Your authenticated Arc Testnet Agent Wallet address |
-| `allowlist` | Contractor recipients explicitly permitted for this installation |
-| `reserve` | Protected USDC balance |
-| `gasLimit` | Conservative gas allowance for each payout |
-| `perObligation` | Maximum principal for one whole obligation |
-| `totalBudget` | Cumulative principal budget for this database; it does not reset daily |
-| `authorityExpiresAt` | Future ISO UTC expiry for the authority you grant |
-| `enabled` | Whether the configured payment authority is enabled |
-
-Policy amounts are **integer micro-USDC strings**: `"1000000"` means 1 USDC; `"100000"` means 0.10 USDC. Business export amounts, by contrast, use decimal strings such as `"0.10"`.
-
-The example policy is disabled, expired and contains placeholders. A policy created by Setup is also disabled and expired, with your verified wallet instead of a placeholder. Complete it before initializing a new authorized testnet database. If Setup already initialized a disabled testnet database, changing this seed file does not activate it; use a reviewed policy migration preserving history. For an authority you have explicitly chosen to grant, initialize `enabled: true` and a future expiry while keeping `SEND_ENABLED=false`. If you intend to use CCTP, initialize the authorized bridge policy with `bridge.enabled: true` while keeping `BRIDGE_ENABLED=false`. This establishes the saved scope without enabling transfers. Generate an expiry you intend to authorize; for example, this prints a timestamp seven days ahead:
-
-```powershell
-[DateTime]::UtcNow.AddDays(7).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-```
-
-For CCTP, add a `bridge` object to the policy, choosing only routes and limits you authorize. Example structure:
-
-```json
-"bridge": {
-  "version": 1,
-  "enabled": false,
-  "sourceChains": ["BASE-SEPOLIA"],
-  "maxAmount": "1000000",
-  "maxFee": "10000"
-}
-```
-
-This example allows a maximum net bridge amount of 1 USDC and a 0.01 USDC fee ceiling, with bridging still disabled. Add it inside the policy's top-level JSON object with the required separating comma. It is a configuration example, not a transfer request.
-
-Supported source testnets and optional RPC overrides:
-
-| Source chain | Environment variable |
-| --- | --- |
-| Ethereum Sepolia | `ETH_SEPOLIA_RPC_URL` |
-| Avalanche Fuji | `AVAX_FUJI_RPC_URL` |
-| Optimism Sepolia | `OP_SEPOLIA_RPC_URL` |
-| Arbitrum Sepolia | `ARB_SEPOLIA_RPC_URL` |
-| Base Sepolia | `BASE_SEPOLIA_RPC_URL` |
-| Polygon Amoy | `MATIC_AMOY_RPC_URL` |
-| Unichain Sepolia | `UNI_SEPOLIA_RPC_URL` |
-
-### Restart and verify before enabling execution
-
-Stop the existing server process and restart it from the project folder. With foreground startup, use Ctrl+C, then `npm start`. Rebuilding alone does not replace a running backend. The local installer's launcher reuses a healthy server and is not a restart command.
-
-In **Funds** and **Setup**, check the wallet connection, Arc Testnet identity, balances, recipients, limits and expiry. Fund your own testnet wallet with canonical testnet USDC using a supported faucet; simulation sample balances do not carry across.
-
-After verifying a database initialized with the intended enabled policy, set `SEND_ENABLED=true` and restart to activate payouts within that saved scope. CCTP additionally requires an enabled saved bridge policy and `BRIDGE_ENABLED=true`. Sending and bridging are separate gates. Enabling source monitoring or the LLM alone does not turn them on. If you initialized the database with a disabled policy, editing the seed file is not an activation method.
-
-General policy editing and authority renewal for an existing database are not implemented in this panel. One-time approvals support only the specific overridable rule named in a request; expired or disabled authority is not such an override. An existing installation needing a scope/expiry change requires a reviewed policy migration preserving its financial history.
-
-The seed policy initializes a **new** database. Editing its principal budget or expiry does not silently replace the policy already persisted in an existing database; do not assume a restart grants more authority. A changed sender or bridge configuration can also be rejected against saved state. Keep the active panel's limits as the source of truth. Do not delete or replace a database with unresolved operations to work around a mismatch.
+The historical startup variables `SEND_ENABLED` and `BRIDGE_ENABLED` remain supported; Setup saves those switches in the ignored `.env`. Connection secrets stay private. Simulation and testnet use separate databases, and sample balances never become testnet funds.
 
 ## 5. Connect business records
 

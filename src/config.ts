@@ -41,12 +41,16 @@ export function runtime() {
     const { bridge, ...policy } = configured;
     initial = { ...initial, mode, paused: false, policy, bridgePolicy: bridge ?? initial.bridgePolicy, obligations: [], evidence: [], snapshot: { balance: '0', chainId: CHAIN_ID, block: '0', observedAt: new Date(0).toISOString() } };
     arc = new ArcReader(process.env.ARC_TESTNET_RPC_URL);
-    const envNames: Record<SourceChain, string> = { 'ETH-SEPOLIA': 'ETH_SEPOLIA_RPC_URL', 'AVAX-FUJI': 'AVAX_FUJI_RPC_URL', 'OP-SEPOLIA': 'OP_SEPOLIA_RPC_URL', 'ARB-SEPOLIA': 'ARB_SEPOLIA_RPC_URL', 'BASE-SEPOLIA': 'BASE_SEPOLIA_RPC_URL', 'MATIC-AMOY': 'MATIC_AMOY_RPC_URL', 'UNI-SEPOLIA': 'UNI_SEPOLIA_RPC_URL' };
-    sources = new Map(initial.bridgePolicy.sourceChains.map(chain => [chain, new EvmSourceReader(chain, process.env[envNames[chain]] ?? SOURCE_CHAINS[chain].rpc)]));
   }
   const store = new Store(process.env.DATABASE_PATH ?? `data/${mode}.db`, initial);
   if (store.read().policy.sender !== initial.policy.sender) throw new Error('SAVED_WALLET_CONFIG_MISMATCH');
-  if (mode === 'testnet' && JSON.stringify(store.read().bridgePolicy) !== JSON.stringify(initial.bridgePolicy)) throw new Error('SAVED_BRIDGE_POLICY_MISMATCH');
+  // Seed files initialize a new workspace. Owner changes in SQLite survive restart.
+  if (mode === 'testnet') {
+    const saved=store.read();PolicySchema.parse(saved.policy);BridgePolicySchema.parse(saved.bridgePolicy);
+    const envNames: Record<SourceChain,string>={'ETH-SEPOLIA':'ETH_SEPOLIA_RPC_URL','AVAX-FUJI':'AVAX_FUJI_RPC_URL','OP-SEPOLIA':'OP_SEPOLIA_RPC_URL','ARB-SEPOLIA':'ARB_SEPOLIA_RPC_URL','BASE-SEPOLIA':'BASE_SEPOLIA_RPC_URL','MATIC-AMOY':'MATIC_AMOY_RPC_URL','UNI-SEPOLIA':'UNI_SEPOLIA_RPC_URL'};
+    // All supported readers are available; the persisted bridge policy gates use.
+    sources=new Map(SOURCE_CHAIN_NAMES.map(chain=>[chain,new EvmSourceReader(chain,process.env[envNames[chain]]??SOURCE_CHAINS[chain].rpc)]));
+  }
   store.bindWallet(`${walletProvider}:${initial.policy.sender}`);
   let engine: Engine;
   const authorize = (intent: Intent) => engine?.planner.financialEnabled !== false && (!engine?.executionGuard || engine.executionGuard()) && authorizeSubmission(store.read(), intent);

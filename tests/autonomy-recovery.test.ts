@@ -44,7 +44,7 @@ test('autonomous wait survives restart, is bounded, and never creates financial 
   } finally {store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('recheck timer and failed-job retry call the LLM even when input has not changed',async()=>{
+test('unchanged recheck timers are free while a failed evaluation can retry after backoff',async()=>{
   const s=fixture();s.obligations=[];s.evidence=[];const store=new Store(':memory:',s);let calls=0,fail=false;let now=Date.now();
   const engine=new Engine(store,new SimulationGateway(store),{name:'offline planner',plan:async()=>{calls++;if(fail)throw new Error('temporary');return [];}});
   const runtime={store,engine,arc:undefined,sources:undefined,bridge:undefined,bridgeEnabled:false,sendEnabled:false,useModel:false,walletProvider:'simulation'};
@@ -52,9 +52,9 @@ test('recheck timer and failed-job retry call the LLM even when input has not ch
   try {
     scheduler.wake('INPUT','initial');await scheduler.tick();assert.equal(calls,1);
     store.change(s=>enqueue(s,'AGENT_RECHECK','timer',now+1000));await scheduler.tick();assert.equal(calls,1);
-    now+=1001;await scheduler.tick();assert.equal(calls,2);
-    fail=true;store.change(s=>enqueue(s,'AGENT_RECHECK','failure',now));await scheduler.tick();assert.equal(calls,3);
-    fail=false;now+=16000;await scheduler.tick();assert.equal(calls,4);
+    now+=1001;await scheduler.tick();assert.equal(calls,1);
+    fail=true;store.change(s=>{s.snapshot.balance='12345678';enqueue(s,'AGENT_RECHECK','failure',now);});await scheduler.tick();assert.equal(calls,2);
+    fail=false;now+=16000;await scheduler.tick();assert.equal(calls,3);
     assert.equal(store.read().autonomy!.jobs.find(j=>j.key==='failure')!.status,'DONE');
   } finally {store.close();}
 });

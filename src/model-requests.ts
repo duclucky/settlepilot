@@ -11,7 +11,7 @@ export interface ModelRequestRecord {
  usage?:ModelUsage;estimatedCostNanoUsd?:number;error?:string;
  inputPrefix?:InputPrefix;inputReservation?:{method:'BYTE_BOUND'|'OBSERVED_PREFIX';inputTokens:number;anchorId?:string};
 }
-export interface ModelControl {requests:ModelRequestRecord[];blocks:Partial<Record<ModelProvider,{code:string;at:number;retryAt?:number}>>;resetVersion?:number;configurationVersion?:number;archivedRequests?:number}
+export interface ModelControl {requests:ModelRequestRecord[];blocks:Partial<Record<ModelProvider,{code:string;at:number;retryAt?:number}>>;resetVersion?:number;configurationVersion?:number;archivedRequests?:number;limits?:ModelLimits}
 export interface ModelLimits {maxRunRequests:number;maxDayRequests:number;maxRunTokens:number;maxDayTokens:number;maxRunCostNanoUsd:number;maxDayCostNanoUsd:number}
 export const defaultModelLimits:ModelLimits={maxRunRequests:40,maxDayRequests:120,maxRunTokens:250_000,maxDayTokens:500_000,maxRunCostNanoUsd:500_000_000,maxDayCostNanoUsd:1_000_000_000};
 export function modelLimits(env:NodeJS.ProcessEnv=process.env):ModelLimits {
@@ -37,12 +37,13 @@ function errorCode(status:number,body:any){
  if(status>=500)return 'MODEL_TEMPORARILY_UNAVAILABLE';
  return 'MODEL_CONFIG_FAILED';
 }
-export const modelFailureCodes=new Set(['MODEL_DISABLED','MODEL_CREDIT_EXHAUSTED','MODEL_AUTH_FAILED','MODEL_CONFIG_FAILED','MODEL_RATE_LIMITED','MODEL_TEMPORARILY_UNAVAILABLE','MODEL_TIMEOUT','MODEL_CONNECTION_FAILED','MODEL_BUDGET_EXCEEDED','MODEL_RUN_LIMIT','MODEL_USAGE_STORAGE_LIMIT','MODEL_RESPONSE_INVALID','MODEL_RESPONSE_INCOMPLETE','MODEL_REPEATED_TOOL_CALL']);
+export const modelFailureCodes=new Set(['MODEL_DISABLED','MODEL_CREDIT_EXHAUSTED','MODEL_AUTH_FAILED','MODEL_CONFIG_FAILED','MODEL_RATE_LIMITED','MODEL_TEMPORARILY_UNAVAILABLE','MODEL_TIMEOUT','MODEL_CONNECTION_FAILED','MODEL_BUDGET_EXCEEDED','MODEL_RUN_LIMIT','MODEL_USAGE_STORAGE_LIMIT','MODEL_RESPONSE_INVALID','MODEL_RESPONSE_INCOMPLETE','MODEL_REPEATED_TOOL_CALL','MODEL_NO_PROGRESS']);
 export class ModelRequestError extends Error {constructor(code:string){super(code);this.name='ModelRequestError';}}
 export class ModelRequests {
  private local:ModelControl={requests:[],blocks:{}};
  private archived:ModelRequestRecord[]=[];
- constructor(private store?:Store,readonly limits=modelLimits(),private clock=()=>Date.now(),private sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms))){}
+ constructor(private store?:Store,private configuredLimits=modelLimits(),private clock=()=>Date.now()){}
+ get limits():ModelLimits{return {...this.configuredLimits,...this.store?.read().modelControl?.limits};}
  private change<T>(fn:(c:ModelControl)=>T):T {return this.store?this.store.change(s=>fn(s.modelControl??={requests:[],blocks:{}})):fn(this.local);}
  snapshot(){return structuredClone(this.store?.read().modelControl??this.local);}
  reset(){this.change(c=>{c.blocks={};c.resetVersion=(c.resetVersion??0)+1;});}
@@ -84,7 +85,6 @@ export class ModelRequests {
  }
  async request(provider:ModelProvider,model:string,url:string,init:RequestInit,transport:typeof fetch,runId:string=randomUUID()):Promise<Response>{
   if(typeof init.body!=='string')throw new ModelRequestError('MODEL_CONFIG_FAILED');
-  for(let attempt=0;attempt<2;attempt++){
    if(init.signal?.aborted)throw new ModelRequestError('MODEL_TIMEOUT');
    let id:string;
    try{id=this.reserve(provider,model,url,runId,init.body);}catch(error){
@@ -115,10 +115,7 @@ export class ModelRequests {
    const transient=code==='MODEL_RATE_LIMITED'||code==='MODEL_TEMPORARILY_UNAVAILABLE';
    const header=response.headers.get('retry-after'),numeric=header?Number(header):NaN;
    const delay=header?(Number.isFinite(numeric)?numeric*1000:Date.parse(header)-this.clock()):1000;
-   if(transient&&attempt===0&&Number.isFinite(delay)&&delay>=0&&delay<=5000&&!init.signal?.aborted){await this.sleep(Math.max(1000,delay));continue;}
    this.change(c=>{this.block(c,provider,{code,at:this.clock(),...(transient?{retryAt:this.clock()+Math.max(300_000,Number.isFinite(delay)?delay:0)}:{})});});
    throw new ModelRequestError(code);
-  }
-  throw new ModelRequestError('MODEL_TEMPORARILY_UNAVAILABLE');
  }
 }

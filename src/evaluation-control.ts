@@ -2,17 +2,24 @@ import {createHash} from 'node:crypto';
 import type {State} from './domain.ts';
 import {decisionKey} from './scheduler-core.ts';
 import {modelFailureCodes} from './model-requests.ts';
+import {CHAIN_ID} from './domain.ts';
+import {verifiedCrosschainBalances} from './treasury.ts';
 
 const recoverableEvaluationCodes=new Set([...modelFailureCodes,'INVALID_TOOL_SEQUENCE','MODEL_TOOL_LIMIT','INVALID_JEV_RESPONSE','MODEL_REQUEST_FAILED','JEV_REQUEST_FAILED']);
 
 // Worker timestamps and job IDs are deliberately absent. Only changed business
 // facts, meaningful deadlines or an explicit reset start a new retry allowance.
-export function evaluationKey(state: State, now: number) {
+export function evaluationKey(state: State, now: number, includeObservationState=true) {
   const deadlines = state.obligations.filter(o => !o.paid && !o.archived).map(o => {
     const remaining = Date.parse(o.due) - now;
     return [o.id, !Number.isFinite(remaining) ? 'INVALID' : remaining <= 0 ? 'DUE' : remaining <= 86400000 ? 'SOON' : remaining <= 14 * 86400000 ? 'WINDOW' : 'FUTURE'];
   });
-  return createHash('sha256').update(JSON.stringify([decisionKey(state), deadlines, state.modelControl?.resetVersion ?? 0, state.modelControl?.configurationVersion ?? 0])).digest('hex');
+  const age=now-Date.parse(state.snapshot.observedAt);
+  const observations=includeObservationState&&state.mode==='testnet'?[state.snapshot.chainId===CHAIN_ID&&Number.isFinite(age)&&age>=-5000&&age<=30000,verifiedCrosschainBalances(state,now).map(b=>b.sourceChain).sort()]:[];
+  const authorityActive=Date.parse(state.policy.authorityExpiresAt)>now;
+  const approvals=state.approvals.filter(a=>Date.parse(a.expiresAt)>now);
+  const ownerDelays=Object.entries(state.autonomy?.deferredUntil??{}).map(([id,until])=>[id,until>now]).sort();
+  return createHash('sha256').update(JSON.stringify([decisionKey(state), deadlines,observations,authorityActive,approvals,ownerDelays, state.modelControl?.resetVersion ?? 0, state.modelControl?.configurationVersion ?? 0])).digest('hex');
 }
 
 export function resolveEvaluationFailures(state: State, recoveredJobId: string) {

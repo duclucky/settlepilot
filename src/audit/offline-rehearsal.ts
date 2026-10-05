@@ -81,7 +81,12 @@ export async function runOfflineScenario(index:number,path=':memory:',seed=5404)
         scheduler=new AgentScheduler(runtime);await scheduler.tick();
         if(index===21){assert.equal(dispatches,0);assert.equal(obligation().paid,false);}
         else if(index===26){assert.equal(obligation().paid,false);assert.equal(store.read().bridgeIntents[0].status,'BURN_OBSERVED');readyMint=true;assert.equal(await runtime.bridge.reconcile(),true);scheduler.wake('BRIDGE_SETTLED');await scheduler.tick();assert.equal(obligation().paid,true);}
-        else{assert.equal(obligation().paid,true);assert.ok(settledProofs>=1);if(index===19||index===20)assert.ok(dispatches>=2);}
+        else{
+          // Each verified mint resumes through a durable scheduler job. Funding
+          // no longer recurses into new LLM run budgets within one tick.
+          for(let step=0;step<10&&!obligation().paid;step++)await scheduler.tick();
+          assert.equal(obligation().paid,true);assert.ok(settledProofs>=1);if(index===19||index===20)assert.ok(dispatches>=2);
+        }
       }else{
         if([22,24,25].includes(index))store.change(s=>{s.snapshot.balance=index===22?amountUnits:'0';if(index===22)s.policy.reserve='1';});
         if(index===23){store.change(s=>{s.bridgePolicy.enabled=true;s.crosschainBalances=[{sourceChain:'BASE-SEPOLIA',balance:'5000000',chainId:84532,block:'1',observedAt:new Date().toISOString(),status:'UNAVAILABLE'},{sourceChain:'OP-SEPOLIA',balance:'2000000',chainId:11155420,block:'1',observedAt:new Date().toISOString(),status:'VERIFIED'}];});assert.equal(planningEligibility(store.read(),obligation()),'ALLOW');}

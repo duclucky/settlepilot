@@ -43,5 +43,6 @@ export interface AutonomyState {
   plans?: GoalPlan[];
   reviews?: ReviewObservation[];
   lastDecisionKey?: string; rejectionBindings: { obligationId: string; binding: string }[];
+  lastEvaluationKey?:string;
 }
 export const emptyAutonomy = (): AutonomyState => ({ enabled:false,schemaVersion: 1, records: [], parties: [], transfers: [], allocations: [], checkpoints: [], jobs: [], requests: [], responses: [], workers: [], fence: 0, sourceAuthority: false, rejectionBindings: [] });

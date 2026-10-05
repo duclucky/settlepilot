@@ -28,13 +28,15 @@ test('LLM receipt association tool creates a bounded exact allocation that only 
   const receivable={externalId:'invoice',revision:1,kind:'RECEIVABLE',partyId:'customer',title:'Delivered work',amount:'0.5',due:new Date().toISOString()};
   ingestSource(store,{sourceId:'books',parties:[{id:'customer',name:'Customer',address:state.policy.allowlist[0]}],records:[receivable,{...receivable,externalId:'second'}]},true);
   store.change(s=>s.autonomy!.transfers.push({id:'receipt',chain:'ARC-TESTNET',hash:`0x${'a'.repeat(64)}`,logIndex:0,sender:state.policy.allowlist[0],recipient:state.policy.sender,amount:'750000',block:'11',blockHash:'b',status:'VERIFIED',classification:'UNMATCHED'}));
+  store.change(s=>s.autonomy!.transfers.push({...s.autonomy!.transfers[0],id:'receipt-two',hash:`0x${'b'.repeat(64)}`}));
   let round=0;const transport=(async(_url,init)=>{
     const body=JSON.parse(init!.body as string);assert.match(JSON.stringify(body.input),/books/);assert.match(body.instructions,/Comment alone never grants/);
-    const tool=round++===0?{name:'propose_receipt_match',args:{transferId:'receipt',sourceRecordKey:'books:invoice',question:'Apply 0.5 USDC to this invoice?'}}:{name:'finish',args:{decisions:[]}};
+    const tool=round===0?{name:'propose_receipt_match',args:{transferId:'receipt',sourceRecordKey:'books:invoice',question:'Apply 0.5 USDC to this invoice?'}}:round===1?{name:'propose_receipt_match',args:{transferId:'receipt-two',sourceRecordKey:'books:second',question:'Apply this other receipt to the second invoice?'}}:{name:'finish',args:{decisions:[]}};round++;
     return new Response(JSON.stringify({output:[{type:'function_call',name:tool.name,call_id:`call${round}`,arguments:JSON.stringify(tool.args)}]}));
   }) as typeof fetch;
   try{
     await new ModelPlanner('fixture','fixture-model',transport,new AgentWorkspace(store)).plan(store.read());
+    assert.equal(round,3);assert.equal(store.read().autonomy!.requests.length,2);
     assert.equal(store.read().autonomy!.allocations.length,0);const request=store.read().autonomy!.requests[0];assert.equal(request.action.amount,'500000');
     respondToAction(store,request.id,{responseId:randomUUID(),kind:'APPROVE',digest:request.digest});assert.equal(store.read().autonomy!.allocations[0].amount,'500000');assert.equal(store.read().snapshot.balance,state.snapshot.balance);
   }finally{store.close();}
